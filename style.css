@@ -1,0 +1,239 @@
+/* ─── Global ─── */
+body, .stApp {
+    background-color: #f8fafc;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+/* ─── KPI Container ─── */
+.kpi-container {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+.kpi-card {
+    flex: 1;
+    min-width: 140px;
+    color: #fff;
+    padding: 20px 24px;
+    border-radius: 14px;
+    text-align: center;
+}
+.kpi-blue {
+    background: linear-gradient(135deg, #3b82f6, #60a5fa);
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.25);
+}
+.kpi-purple {
+    background: linear-gradient(135deg, #6366f1, #818cf8);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
+}
+.kpi-orange {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    box-shadow: 0 4px 16px rgba(245, 158, 11, 0.25);
+}
+.kpi-red {
+    background: linear-gradient(135deg, #ef4444, #f87171);
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.25);
+}
+.kpi-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.9;
+    margin-bottom: 6px;
+}
+.kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+}
+
+/* ─── CSM Cards (Horizontal Strip / Line-by-Line) ─── */
+.csm-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 16px 24px;
+    margin-bottom: 12px;
+    gap: 20px;
+    flex-wrap: wrap;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.csm-card:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+/* Card header: avatar + name */
+.card-header-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 250px;
+    flex: 1.2;
+}
+.avatar-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+.csm-meta-info {
+    flex: 1;
+}
+.csm-role-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #6366f1;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+.csm-name-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 2px 0;
+}
+.csm-company-subtitle {
+    font-size: 13px;
+    color: #64748b;
+}
+.csm-id-badge {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #4f46e5;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 6px;
+}
+
+/* Horizontal fields grid */
+.csm-fields-grid {
+    display: flex;
+    gap: 40px;
+    flex: 2;
+    padding: 6px 16px;
+    border-left: 1px solid #f1f5f9;
+    border-right: 1px solid #f1f5f9;
+    min-width: 320px;
+    justify-content: space-around;
+}
+.csm-field-row {
+    flex: 1;
+}
+.csm-field-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+.csm-field-value {
+    font-size: 13.5px;
+    color: #334155;
+    word-break: break-all;
+}
+.csm-field-value.blank {
+    color: #cbd5e1;
+    font-style: italic;
+}
+
+/* ─── Action Buttons ─── */
+.card-actions {
+    display: flex;
+    gap: 10px;
+    min-width: 200px;
+    justify-content: flex-end;
+    flex: 1;
+}
+
+/* Email button - clickable link */
+.action-btn-link {
+    text-decoration: none !important;
+    cursor: pointer;
+    display: inline-block;
+}
+.action-btn-link:hover {
+    text-decoration: none !important;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #334155;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid #e2e8f0;
+    user-select: none;
+}
+
+/* Email button hover */
+.email-btn:hover {
+    background: #3b82f6 !important;
+    color: #fff !important;
+    border-color: #3b82f6 !important;
+}
+
+/* Slack button hover */
+.slack-btn:hover {
+    background: #6366f1 !important;
+    color: #fff !important;
+    border-color: #6366f1 !important;
+}
+
+/* Disabled button */
+.disabled-btn {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Dummy badge on Slack button */
+.dummy-badge {
+    font-size: 9px;
+    background: #fbbf24;
+    color: #78350f;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-left: 4px;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 900px) {
+    .csm-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .csm-fields-grid {
+        border-left: none;
+        border-right: none;
+        padding-left: 0;
+        padding-right: 0;
+        width: 100%;
+        gap: 16px;
+    }
+    .card-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
+}
