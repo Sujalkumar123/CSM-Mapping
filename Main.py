@@ -18,7 +18,7 @@ st.set_page_config(
 
 # ─── Configuration Constants ───
 EXCEL_PATH = get_excel_path()
-SLACK_WORKSPACE = "flick2know"  # Change this to your Slack workspace subdomain
+SLACK_WORKSPACE = "fieldassist"  # Change this to your Slack workspace subdomain
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slack_token.txt")
 
 # ─── Load Slack Bot Token ───
@@ -32,6 +32,8 @@ css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "style.css")
 if os.path.exists(css_path):
     with open(css_path) as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
 
 # ─── Session State ───
 if "page" not in st.session_state:
@@ -72,6 +74,7 @@ all_csm_names = sorted(set(
     [n for n in df["csm_name_1"].unique().tolist() + df["csm_name_2"].unique().tolist() if n != ""]
 ))
 all_products = sorted(set([p for p in df["product"].unique().tolist() if p != ""]))
+all_company_names = sorted(set([c for c in df["legalName"].unique().tolist() if c != ""]))
 
 # ════════════════════════════════════════
 #  SIDEBAR (Filters & CSM Adding Form)
@@ -262,10 +265,13 @@ kpi_html = f"""
 """
 st.markdown(kpi_html, unsafe_allow_html=True)
 
-# ─── Search Bar ───
-search_query = st.text_input(
+# ─── Search Bar (Searchable Dropdown Selectbox) ───
+search_options = [""] + [f"🏢 {c}" for c in all_company_names] + [f"👤 {n}" for n in all_csm_names]
+selected_search = st.selectbox(
     "🔍 Search",
-    placeholder="Search by CSM name, company, or ID...",
+    options=search_options,
+    index=0,
+    placeholder="Search by CSM or Company name...",
     label_visibility="collapsed"
 )
 
@@ -282,15 +288,15 @@ if selected_csm != "All CSMs":
 if selected_product != "All Products":
     filtered_df = filtered_df[filtered_df["product"] == selected_product]
 
-if search_query:
-    q = search_query.lower()
-    filtered_df = filtered_df[
-        filtered_df["csm_name_1"].str.lower().str.contains(q, na=False) |
-        filtered_df["csm_name_2"].str.lower().str.contains(q, na=False) |
-        filtered_df["legalName"].str.lower().str.contains(q, na=False) |
-        filtered_df["aliasBrand"].str.lower().str.contains(q, na=False) |
-        filtered_df["id"].str.contains(q, na=False)
-    ]
+if selected_search:
+    q = selected_search[2:]  # Remove emoji prefix and space
+    if selected_search.startswith("🏢"):
+        filtered_df = filtered_df[filtered_df["legalName"] == q]
+    elif selected_search.startswith("👤"):
+        filtered_df = filtered_df[
+            (filtered_df["csm_name_1"] == q) | 
+            (filtered_df["csm_name_2"] == q)
+        ]
 
 # Sorting
 if sort_option == "CSM name (A-Z)":
@@ -376,10 +382,9 @@ for _, row in page_df.iterrows():
     else:
         email_display_html = f'<span class="blank">{email_display}</span>'
     
-    # 💬 Slack Link redirection
     if slack_id:
-        slack_link = f"https://{SLACK_WORKSPACE}.slack.com/team/{slack_id}"
-        slack_display_html = f'<a href="{slack_link}" target="_blank" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+        slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
+        slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
     else:
         slack_display_html = '<span class="blank">Not Set</span>'
     
