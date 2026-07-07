@@ -4,6 +4,24 @@ body, .stApp {
     font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
+/* Hide Streamlit default headers, Deploy button & Main menu */
+header, [data-testid="stHeader"], .stAppHeader {
+    visibility: hidden !important;
+    display: none !important;
+    height: 0px !important;
+}
+.stDeployButton {
+    display: none !important;
+}
+footer {
+    visibility: hidden !important;
+    display: none !important;
+}
+#MainMenu {
+    visibility: hidden !important;
+    display: none !important;
+}
+
 /* ─── KPI Container ─── */
 .kpi-container {
     display: flex;
@@ -242,5 +260,19 @@ body, .stApp {
     .card-actions {
         justify-content: flex-start;
         width: 100%;
+    }
+}
+
+/* ─── Contact Profiles Grid Inside Cards ─── */
+.contact-block {
+    flex: 1;
+    min-width: 240px;
+    padding: 10px 0;
+}
+
+@media (min-width: 768px) {
+    .contact-block + .contact-block {
+        border-left: 1px solid #f1f5f9;
+        padding-left: 20px;
     }
 }

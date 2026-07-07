@@ -47,30 +47,137 @@ if "show_add_form" not in st.session_state:
 # ─── Load Data ───
 df = load_data(EXCEL_PATH)
 
+# ─── Auto-Patch CSM Records ───
+if "patched_csm_records" not in st.session_state:
+    try:
+        csm_updates = {
+            "akshaya.p@flick2know.com": {"slack": "U090XFLUZJ5"},
+            "aman.rathore@flick2know.com": {"slack": "U08NCFR9YSE"},
+            "anish@flick2know.com": {"phone": "9769878141"},
+            "s.ankur@flick2know.com": {"slack": "UA4RZE0FL"},
+            "anupama.humbi@flick2know.com": {"phone": "6364235798", "slack": "U0B813L4T5J"},
+            "apurva.nayak@flick2know.com": {"phone": "8169617356", "slack": "U09GBN0K214"},
+            "abhishek.jadon@flick2know.com": {"slack": "U08TWRLMU4D"},
+            "khushi.yadav@flick2know.com": {"slack": "U09ASRVKLN6"},
+            "nithin.saklani@flick2know.com": {"slack": "U090XFM2FLZ"},
+            "prathvi.poojary@flick2know.com": {"slack": "U09574TQE1M", "phone": "9008063332"},
+            "shruti.priya@flick2know.com": {"slack": "U09QQDNJV4H"},
+            "suvarna.chaudhary@flick2know.com": {"slack": "U090XFHQUE5"},
+            "swapnil.nawani@flick2know.com": {"slack": "U08S96Q5B5X"},
+            "taniya.biswas@flick2know.com": {"slack": "U090XFMMR8R", "phone": "9528411292"},
+            "vaishali.mishra@flick2know.com": {"slack": "U08R00E8ECB"},
+            "prateek.j@flick2know.com": {"phone": "8770879431"},
+            "yogesh.sharma@flick2know.com": {"slack": "U08N4S3H335"}
+        }
+
+        csm_removals = {
+            "aman@flick2know.com",
+            "amulya.sharma@flick2know.com",
+            "bharti.chaudhary@flick2know.com",
+            "blinsia@flick2know.com",
+            "diksha.dubey@flick2know.com",
+            "shiva@flick2know.com",
+            "jai.arora@flick2know.com",
+            "linson@flick2know.com",
+            "maria.aizel@flick2know.com",
+            "maria@flick2know.com",
+            "nikhil.y@flick2know.com",
+            "omkar@flick2know.com",
+            "rahul.agarwal@flick2know.com",
+            "ritish.nigam@flick2know.com",
+            "samdiksha@flick2know.com",
+            "teezil@flick2know.com",
+            "viplove@flick2know.com",
+            "vivek@flick2know.com"
+        }
+
+        csm_name_removals = {
+            "vikas kumar tandon"
+        }
+
+        def patch_row(row_dict):
+            updated = False
+            
+            # --- Primary CSM Check ---
+            email1 = str(row_dict.get("csm_email_1", "")).strip().lower()
+            name1 = str(row_dict.get("csm_name_1", "")).strip().lower()
+            
+            if email1 in csm_removals or name1 in csm_name_removals:
+                row_dict["csm_name_1"] = ""
+                row_dict["csm_contact_1"] = ""
+                row_dict["csm_email_1"] = ""
+                row_dict["csm_slack_1"] = ""
+                updated = True
+            elif email1 in csm_updates:
+                rules = csm_updates[email1]
+                if "slack" in rules and row_dict.get("csm_slack_1") != rules["slack"]:
+                    row_dict["csm_slack_1"] = rules["slack"]
+                    updated = True
+                if "phone" in rules and row_dict.get("csm_contact_1") != rules["phone"]:
+                    row_dict["csm_contact_1"] = rules["phone"]
+                    updated = True
+            elif "abhishek singh jadon" in name1:
+                if row_dict.get("csm_slack_1") != "U08TWRLMU4D":
+                    row_dict["csm_slack_1"] = "U08TWRLMU4D"
+                    updated = True
+            elif "rushikesh ashok bhoite" in name1:
+                if row_dict.get("csm_slack_1") != "U08R00BG999" or row_dict.get("csm_contact_1") != "7020364919":
+                    row_dict["csm_slack_1"] = "U08R00BG999"
+                    row_dict["csm_contact_1"] = "7020364919"
+                    updated = True
+
+            # --- Secondary CSM Check ---
+            email2 = str(row_dict.get("csm_email_2", "")).strip().lower()
+            name2 = str(row_dict.get("csm_name_2", "")).strip().lower()
+            
+            if email2 in csm_removals or name2 in csm_name_removals:
+                row_dict["csm_name_2"] = ""
+                row_dict["csm_contact_2"] = ""
+                row_dict["csm_email_2"] = ""
+                row_dict["csm_slack_2"] = ""
+                updated = True
+            elif email2 in csm_updates:
+                rules = csm_updates[email2]
+                if "slack" in rules and row_dict.get("csm_slack_2") != rules["slack"]:
+                    row_dict["csm_slack_2"] = rules["slack"]
+                    updated = True
+                if "phone" in rules and row_dict.get("csm_contact_2") != rules["phone"]:
+                    row_dict["csm_contact_2"] = rules["phone"]
+                    updated = True
+            elif "abhishek singh jadon" in name2:
+                if row_dict.get("csm_slack_2") != "U08TWRLMU4D":
+                    row_dict["csm_slack_2"] = "U08TWRLMU4D"
+                    updated = True
+            elif "rushikesh ashok bhoite" in name2:
+                if row_dict.get("csm_slack_2") != "U08R00BG999" or row_dict.get("csm_contact_2") != "7020364919":
+                    row_dict["csm_slack_2"] = "U08R00BG999"
+                    row_dict["csm_contact_2"] = "7020364919"
+                    updated = True
+                    
+            return row_dict, updated
+
+        updated_count = 0
+        for idx, row in df.iterrows():
+            row_dict = dict(row)
+            row_dict, is_updated = patch_row(row_dict)
+            if is_updated:
+                for col in row_dict:
+                    df.at[idx, col] = row_dict[col]
+                updated_count += 1
+                
+        if updated_count > 0:
+            save_data(df, EXCEL_PATH)
+            st.toast(f"⚡ Auto-patched {updated_count} CSM records!")
+        st.session_state.patched_csm_records = True
+    except Exception as e:
+        st.sidebar.error(f"Patch error: {e}")
+
+
 if df.empty:
     st.warning("⚠️ No data found. Place your Excel file in the project folder.")
     st.stop()
 
-# ─── Automatic Slack ID Lookup (using Slack Bot Token) ───
-if bot_token:
-    updated = False
-    for idx, row in df.iterrows():
-        # Check Primary CSM
-        if row["csm_email_1"] and not row["csm_slack_1"]:
-            resolved_id = lookup_slack_id_by_email(row["csm_email_1"], bot_token)
-            if resolved_id:
-                df.at[idx, "csm_slack_1"] = resolved_id
-                updated = True
-        # Check Secondary CSM
-        if row["csm_email_2"] and not row["csm_slack_2"]:
-            resolved_id = lookup_slack_id_by_email(row["csm_email_2"], bot_token)
-            if resolved_id:
-                df.at[idx, "csm_slack_2"] = resolved_id
-                updated = True
-                
-    if updated:
-        save_data(df, EXCEL_PATH)
-        st.toast("⚡ Automatically fetched and mapped missing Slack IDs using your token!")
+
 
 # ─── Build Filter Options ───
 all_csm_names = sorted(set(
@@ -92,6 +199,9 @@ sort_option = st.sidebar.selectbox("Sort by", [
 ])
 
 st.sidebar.markdown("---")
+
+
+
 
 # ─── ADD NEW CSM BUTTON (sidebar) ───
 if st.sidebar.button("➕ Add New CSM", use_container_width=True, type="primary"):
@@ -216,18 +326,6 @@ with st.sidebar.expander("✏️ Edit / Remove CSM"):
                     save_data(df, EXCEL_PATH)
                     st.success("✅ Removed!")
                     st.rerun()
-
-st.sidebar.markdown("---")
-
-# ─── Slack Bot Token Config (sidebar expander) ───
-with st.sidebar.expander("🔌 Slack Auto-ID Lookup"):
-    st.markdown("<small>Paste a Slack Bot OAuth Token (starting with <code>xoxb-</code>) with the <code>users:read.email</code> scope to automatically look up and map Slack buttons by their email addresses.</small>", unsafe_allow_html=True)
-    new_token = st.text_input("Slack Token", value=bot_token, type="password", label_visibility="collapsed")
-    if st.button("💾 Save Token"):
-        with open(TOKEN_FILE, "w") as f:
-            f.write(new_token.strip())
-        st.success("Token saved!")
-        st.rerun()
 
 st.sidebar.markdown("---")
 csv = df.to_csv(index=False).encode("utf-8")
@@ -400,7 +498,7 @@ if current_view == "csm":
             "slack": info["slack"]
         })
 
-    # Render CSM members
+    # Render CSM members using premium custom cards
     for csm in csm_list:
         csm_name = csm["name"]
         initials = get_initials(csm_name)
@@ -411,60 +509,53 @@ if current_view == "csm":
         email_display = email if email else "Blank"
         phone_display = phone if phone else "Blank"
         
-        # 📧 Email Link redirection to Web Gmail compose
         if email:
             email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
-            email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
+            email_btn = f'<a href="{email_link}" target="_blank" class="action-btn-link"><div class="action-btn email-btn">✉ Compose</div></a>'
         else:
-            email_display_html = f'<span class="blank">{email_display}</span>'
-        
-        # 💬 Slack Link redirection
+            email_btn = '<div class="action-btn disabled-btn">✉ Compose</div>'
+            
         if slack_id:
             slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
-            slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+            slack_btn = f'<a href="{slack_link}" class="action-btn-link"><div class="action-btn slack-btn">💬 Slack</div></a>'
         else:
-            slack_display_html = '<span class="blank">Not Set</span>'
-        
-        # 🟢 WhatsApp Link redirection
+            slack_btn = '<div class="action-btn disabled-btn">💬 Slack</div>'
+            
         wa_link = get_whatsapp_link(phone)
         if wa_link:
-            phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
+            phone_btn = f'<a href="{wa_link}" target="_blank" class="action-btn-link"><div class="action-btn whatsapp-btn">📞 WhatsApp</div></a>'
         else:
-            phone_display_html = f'<span class="blank">{phone_display}</span>'
+            phone_btn = '<div class="action-btn disabled-btn">📞 WhatsApp</div>'
 
-        with st.container(border=True):
-            col_avatar, col_fields = st.columns([1.5, 3.5])
-            
-            with col_avatar:
-                avatar_html = f"""
-                <div style="display: flex; align-items: center; gap: 14px; margin-top: 5px;">
-                    <div class="avatar-circle">{initials}</div>
-                    <div>
-                        <div class="csm-role-label">CSM Member</div>
-                        <div class="csm-name-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #1e293b;">{csm_name}</div>
-                    </div>
+        card_html = f"""
+        <div class="csm-card" style="display: flex; flex-direction: column; align-items: stretch; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 14px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
+                <div class="avatar-circle">{initials}</div>
+                <div>
+                    <div class="csm-role-label">CSM Member</div>
+                    <div class="csm-name-title">{csm_name}</div>
                 </div>
-                """
-                st.markdown(avatar_html, unsafe_allow_html=True)
-                
-            with col_fields:
-                fields_html = f"""
-                <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
-                    </div>
+            </div>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 240px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email Address</div>
+                    <div style="font-size: 13.5px; color: #475569; margin-bottom: 6px; word-break: break-all;">📧 {email_display}</div>
+                    {email_btn}
                 </div>
-                """
-                st.markdown(fields_html, unsafe_allow_html=True)
+                <div style="flex: 1; min-width: 240px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone Number</div>
+                    <div style="font-size: 13.5px; color: #475569; margin-bottom: 6px;">📞 {phone_display}</div>
+                    {phone_btn}
+                </div>
+                <div style="flex: 1; min-width: 240px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack Account</div>
+                    <div style="font-size: 13.5px; color: #475569; margin-bottom: 6px;">💬 Slack Member ID: {slack_id if slack_id else "Not Set"}</div>
+                    {slack_btn}
+                </div>
+            </div>
+        </div>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
 
 else:
     # ─── Reset items_to_show on filter change ───
@@ -482,7 +573,7 @@ else:
     # Slice the filtered dataframe based on infinite scroll limit
     page_df = filtered_df.iloc[0:st.session_state.items_to_show]
 
-    # Render line-by-line (one per row)
+    # Render line-by-line using premium custom cards
     for _, row in page_df.iterrows():
         csm_name = row["csm_name_1"] if row["csm_name_1"] else "Unassigned"
         initials = get_initials(csm_name)
@@ -490,74 +581,162 @@ else:
         client_id = row["id"]
         product_val = row["product"] if row["product"] else "N/A"
         
+        # --- Primary CSM details ---
         email = row["csm_email_1"] if row["csm_email_1"] else ""
         phone = row["csm_contact_1"] if row["csm_contact_1"] else ""
         slack_id = row.get("csm_slack_1", "")
         
         email_display = email if email else "Blank"
         phone_display = phone if phone else "Blank"
-        email_class = "" if email else "blank"
-        phone_class = "" if phone else "blank"
         
-        # 📧 Email Link redirection to Web Gmail compose
         if email:
             email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
-            email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
+            email_btn = f'<a href="{email_link}" target="_blank" class="action-btn-link"><div class="action-btn email-btn">✉ Compose</div></a>'
         else:
-            email_display_html = f'<span class="blank">{email_display}</span>'
-        
+            email_btn = '<div class="action-btn disabled-btn">✉ Compose</div>'
+            
         if slack_id:
             slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
-            slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+            slack_btn = f'<a href="{slack_link}" class="action-btn-link"><div class="action-btn slack-btn">💬 Slack</div></a>'
         else:
-            slack_display_html = '<span class="blank">Not Set</span>'
-        
-        # 🟢 WhatsApp Link redirection
+            slack_btn = '<div class="action-btn disabled-btn">💬 Slack</div>'
+            
         wa_link = get_whatsapp_link(phone)
         if wa_link:
-            phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
+            phone_btn = f'<a href="{wa_link}" target="_blank" class="action-btn-link"><div class="action-btn whatsapp-btn">📞 WhatsApp</div></a>'
         else:
-            phone_display_html = f'<span class="blank">{phone_display}</span>'
+            phone_btn = '<div class="action-btn disabled-btn">📞 WhatsApp</div>'
 
-        # Render each record inside a clean bordered container
-        with st.container(border=True):
-            col_avatar, col_fields = st.columns([1.5, 3.5])
+        # --- Secondary CSM details ---
+        csm_name_2 = row.get("csm_name_2", "")
+        secondary_html = ""
+        if csm_name_2 and str(csm_name_2).strip() != "" and str(csm_name_2).strip().lower() != "nan":
+            initials2 = get_initials(csm_name_2)
+            email2 = row.get("csm_email_2", "")
+            phone2 = row.get("csm_contact_2", "")
+            slack_id2 = row.get("csm_slack_2", "")
             
-            with col_avatar:
-                avatar_html = f"""
-                <div style="display: flex; align-items: center; gap: 14px; margin-top: 5px;">
-                    <div class="avatar-circle">{initials}</div>
-                    <div>
-                        <div class="csm-role-label">CSM</div>
-                        <div class="csm-name-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #1e293b;">{csm_name}</div>
-                        <div class="csm-company-subtitle" style="font-size: 13px; color: #64748b;">{company} <span class="csm-id-badge" style="background:#e0e7ff; color:#4f46e5; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; margin-left:6px;">ID {client_id}</span></div>
-                    </div>
-                </div>
-                """
-                st.markdown(avatar_html, unsafe_allow_html=True)
+            email2_display = email2 if email2 else "Blank"
+            phone2_display = phone2 if phone2 else "Blank"
+            
+            if email2:
+                email_link2 = f"https://mail.google.com/mail/?view=cm&fs=1&to={email2}"
+                email_btn2 = f'<a href="{email_link2}" target="_blank" class="action-btn-link"><div class="action-btn email-btn">✉ Compose</div></a>'
+            else:
+                email_btn2 = '<div class="action-btn disabled-btn">✉ Compose</div>'
                 
-            with col_fields:
-                fields_html = f"""
-                <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
+            if slack_id2:
+                slack_link2 = f"slack://user?team=T041B4BGT&id={slack_id2}"
+                slack_btn2 = f'<a href="{slack_link2}" class="action-btn-link"><div class="action-btn slack-btn">💬 Slack</div></a>'
+            else:
+                slack_btn2 = '<div class="action-btn disabled-btn">💬 Slack</div>'
+                
+            wa_link2 = get_whatsapp_link(phone2)
+            if wa_link2:
+                phone_btn2 = f'<a href="{wa_link2}" target="_blank" class="action-btn-link"><div class="action-btn whatsapp-btn">📞 WhatsApp</div></a>'
+            else:
+                phone_btn2 = '<div class="action-btn disabled-btn">📞 WhatsApp</div>'
+                
+            secondary_html = f"""
+            <div class="contact-block">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                    <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 12px; background: linear-gradient(135deg, #10b981, #34d399);">{initials2}</div>
                     <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
-                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Product</div>
-                        <div style="font-size: 13.5px; color: #334155;">{product_val}</div>
+                        <div style="font-size: 10px; font-weight: 600; color: #10b981; text-transform: uppercase; letter-spacing: 0.5px;">Secondary CSM</div>
+                        <div style="font-size: 14px; font-weight: 700; color: #334155;">{csm_name_2}</div>
                     </div>
                 </div>
-                """
-                st.markdown(fields_html, unsafe_allow_html=True)
+                <div style="font-size: 12px; color: #475569; margin: 4px 0 2px 2px; word-break: break-all;">📧 {email2_display}</div>
+                <div style="font-size: 12px; color: #475569; margin: 2px 0 8px 2px;">📞 {phone2_display}</div>
+                <div style="display: flex; gap: 6px;">
+                    {email_btn2}
+                    {slack_btn2}
+                    {phone_btn2}
+                </div>
+            </div>
+            """
+
+        # --- Lead details ---
+        lead_name = row.get("lead_name", "")
+        lead_html = ""
+        if lead_name and str(lead_name).strip() != "" and str(lead_name).strip().lower() != "nan":
+            initials_l = get_initials(lead_name)
+            email_l = row.get("lead_email", "")
+            phone_l = row.get("lead_contact", "")
+            
+            email_l_display = email_l if email_l else "Blank"
+            phone_l_display = phone_l if phone_l else "Blank"
+            
+            if email_l:
+                email_link_l = f"https://mail.google.com/mail/?view=cm&fs=1&to={email_l}"
+                email_btn_l = f'<a href="{email_link_l}" target="_blank" class="action-btn-link"><div class="action-btn email-btn">✉ Compose</div></a>'
+            else:
+                email_btn_l = '<div class="action-btn disabled-btn">✉ Compose</div>'
+                
+            wa_link_l = get_whatsapp_link(phone_l)
+            if wa_link_l:
+                phone_btn_l = f'<a href="{wa_link_l}" target="_blank" class="action-btn-link"><div class="action-btn whatsapp-btn">📞 WhatsApp</div></a>'
+            else:
+                phone_btn_l = '<div class="action-btn disabled-btn">📞 WhatsApp</div>'
+                
+            lead_html = f"""
+            <div class="contact-block">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                    <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 12px; background: linear-gradient(135deg, #f59e0b, #fbbf24);">{initials_l}</div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #f59e0b; text-transform: uppercase; letter-spacing: 0.5px;">Account Lead</div>
+                        <div style="font-size: 14px; font-weight: 700; color: #334155;">{lead_name}</div>
+                    </div>
+                </div>
+                <div style="font-size: 12px; color: #475569; margin: 4px 0 2px 2px; word-break: break-all;">📧 {email_l_display}</div>
+                <div style="font-size: 12px; color: #475569; margin: 2px 0 8px 2px;">📞 {phone_l_display}</div>
+                <div style="display: flex; gap: 6px;">
+                    {email_btn_l}
+                    {phone_btn_l}
+                </div>
+            </div>
+            """
+
+        card_html = f"""
+        <div class="csm-card" style="display: flex; flex-direction: column; align-items: stretch; gap: 14px;">
+            <!-- Top Header of Card: Company & Product Badge -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <span style="font-weight: 700; color: #1e293b; font-size: 16px;">{company}</span>
+                    <span class="csm-id-badge">ID {client_id}</span>
+                </div>
+                <div style="font-weight: 600; color: #4f46e5; font-size: 12px; background: #e0e7ff; padding: 4px 10px; border-radius: 6px;">{product_val}</div>
+            </div>
+            
+            <!-- Contact Profiles Row -->
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
+                <!-- Primary CSM Contact Block -->
+                <div class="contact-block" style="flex: 1; min-width: 240px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 12px;">{initials}</div>
+                        <div>
+                            <div style="font-size: 10px; font-weight: 600; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px;">Primary CSM</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #334155;">{csm_name}</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #475569; margin: 4px 0 2px 2px; word-break: break-all;">📧 {email_display}</div>
+                    <div style="font-size: 12px; color: #475569; margin: 2px 0 8px 2px;">📞 {phone_display}</div>
+                    <div style="display: flex; gap: 6px;">
+                        {email_btn}
+                        {slack_btn}
+                        {phone_btn}
+                    </div>
+                </div>
+                
+                <!-- Secondary CSM Contact Block -->
+                {secondary_html}
+                
+                <!-- Lead Contact Block -->
+                {lead_html}
+            </div>
+        </div>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
 
     # --- Infinite Scroll Loader ---
     if st.session_state.items_to_show < len(filtered_df):
