@@ -28,7 +28,8 @@ print("\n1. Staging changed files...")
 files_to_add = [
     "Main.py", "data_loader.py", "style.css", "requirements.txt",
     "go_live.py", "go_live.bat", "auto_lookup_slack.py", "auto_lookup_slack.bat",
-    "match_slack_export.py", "match_slack_export.bat", "slack_members.csv"
+    "match_slack_export.py", "match_slack_export.bat", "slack_members.csv",
+    "patch_csm.py", "patch_csm.bat"
 ]
 for f in files_to_add:
     if os.path.exists(os.path.join(base_dir, f)):

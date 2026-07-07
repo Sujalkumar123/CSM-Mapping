@@ -35,6 +35,9 @@ if os.path.exists(css_path):
 
 
 
+# ─── Query Parameters & Views ───
+current_view = st.query_params.get("view", "clients")
+
 # ─── Session State ───
 if "page" not in st.session_state:
     st.session_state.page = 1
@@ -245,22 +248,22 @@ missing_email = len(df[(df["csm_name_1"] != "") & (df["csm_email_1"] == "")])
 
 kpi_html = f"""
 <div class="kpi-container">
-    <div class="kpi-card kpi-blue">
+    <a href="?view=clients" target="_self" class="kpi-card kpi-blue" style="text-decoration: none; color: #fff;">
         <div class="kpi-title">Total Clients</div>
         <div class="kpi-value">{total_clients}</div>
-    </div>
-    <div class="kpi-card kpi-purple">
-        <div class="kpi-title">Total CSMs</div>
+    </a>
+    <a href="?view=csm" target="_self" class="kpi-card kpi-purple" style="text-decoration: none; color: #fff;">
+        <div class="kpi-title">Total CSM</div>
         <div class="kpi-value">{total_csms}</div>
-    </div>
-    <div class="kpi-card kpi-orange">
+    </a>
+    <a href="?view=missing_phone" target="_self" class="kpi-card kpi-orange" style="text-decoration: none; color: #fff;">
         <div class="kpi-title">Missing Phone</div>
         <div class="kpi-value">{missing_phone}</div>
-    </div>
-    <div class="kpi-card kpi-red">
+    </a>
+    <a href="?view=missing_email" target="_self" class="kpi-card kpi-red" style="text-decoration: none; color: #fff;">
         <div class="kpi-title">Missing Email</div>
         <div class="kpi-value">{missing_email}</div>
-    </div>
+    </a>
 </div>
 """
 st.markdown(kpi_html, unsafe_allow_html=True)
@@ -279,6 +282,12 @@ selected_search = st.selectbox(
 #  FILTER + SORT DATA
 # ════════════════════════════════════════
 filtered_df = df.copy()
+
+# Apply KPI filter based on the active view
+if current_view == "missing_phone":
+    filtered_df = filtered_df[(filtered_df["csm_name_1"] != "") & (filtered_df["csm_contact_1"] == "")]
+elif current_view == "missing_email":
+    filtered_df = filtered_df[(filtered_df["csm_name_1"] != "") & (filtered_df["csm_email_1"] == "")]
 
 if selected_csm != "All CSMs":
     filtered_df = filtered_df[
@@ -299,20 +308,25 @@ if selected_search:
         ]
 
 # Sorting
-if sort_option == "CSM name (A-Z)":
-    filtered_df = filtered_df.sort_values("csm_name_1", ascending=True)
-elif sort_option == "CSM name (Z-A)":
-    filtered_df = filtered_df.sort_values("csm_name_1", ascending=False)
-elif sort_option == "Company name (A-Z)":
-    filtered_df = filtered_df.sort_values("legalName", ascending=True)
-elif sort_option == "Company name (Z-A)":
-    filtered_df = filtered_df.sort_values("legalName", ascending=False)
-elif sort_option == "ID (Ascending)":
-    filtered_df["_sort"] = pd.to_numeric(filtered_df["id"], errors="coerce").fillna(99999)
-    filtered_df = filtered_df.sort_values("_sort").drop(columns=["_sort"])
-elif sort_option == "ID (Descending)":
-    filtered_df["_sort"] = pd.to_numeric(filtered_df["id"], errors="coerce").fillna(-1)
-    filtered_df = filtered_df.sort_values("_sort", ascending=False).drop(columns=["_sort"])
+if not filtered_df.empty:
+    filtered_df["_unassigned_sort"] = (filtered_df["csm_name_1"].isna() | (filtered_df["csm_name_1"].astype(str).str.strip() == "")).astype(int)
+    
+    if sort_option == "CSM name (A-Z)":
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "csm_name_1"], ascending=[True, True])
+    elif sort_option == "CSM name (Z-A)":
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "csm_name_1"], ascending=[True, False])
+    elif sort_option == "Company name (A-Z)":
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "legalName"], ascending=[True, True])
+    elif sort_option == "Company name (Z-A)":
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "legalName"], ascending=[True, False])
+    elif sort_option == "ID (Ascending)":
+        filtered_df["_sort"] = pd.to_numeric(filtered_df["id"], errors="coerce").fillna(99999)
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "_sort"], ascending=[True, True]).drop(columns=["_sort"])
+    elif sort_option == "ID (Descending)":
+        filtered_df["_sort"] = pd.to_numeric(filtered_df["id"], errors="coerce").fillna(-1)
+        filtered_df = filtered_df.sort_values(by=["_unassigned_sort", "_sort"], ascending=[True, False]).drop(columns=["_sort"])
+        
+    filtered_df = filtered_df.drop(columns=["_unassigned_sort"])
 
 st.markdown(
     f"<p style='color:#64748b;font-size:14px;margin:8px 0 20px;'>"
@@ -349,107 +363,240 @@ def get_whatsapp_link(phone):
     return f"https://wa.me/{cleaned}"
 
 
-# Pagination
-cards_per_page = 10
-total_pages = max(1, math.ceil(len(filtered_df) / cards_per_page))
-if st.session_state.page > total_pages:
-    st.session_state.page = total_pages
-
-start = (st.session_state.page - 1) * cards_per_page
-page_df = filtered_df.iloc[start:start + cards_per_page]
-
-# Render line-by-line (one per row)
-for _, row in page_df.iterrows():
-    csm_name = row["csm_name_1"] if row["csm_name_1"] else "Unassigned"
-    initials = get_initials(csm_name)
-    company = row["legalName"] if row["legalName"] else "Unknown"
-    client_id = row["id"]
-    product_val = row["product"] if row["product"] else "N/A"
-    
-    email = row["csm_email_1"] if row["csm_email_1"] else ""
-    phone = row["csm_contact_1"] if row["csm_contact_1"] else ""
-    slack_id = row.get("csm_slack_1", "")
-    
-    email_display = email if email else "Blank"
-    phone_display = phone if phone else "Blank"
-    email_class = "" if email else "blank"
-    phone_class = "" if phone else "blank"
-    
-    # 📧 Email Link redirection to Web Gmail compose
-    if email:
-        email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
-        email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
-    else:
-        email_display_html = f'<span class="blank">{email_display}</span>'
-    
-    if slack_id:
-        slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
-        slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
-    else:
-        slack_display_html = '<span class="blank">Not Set</span>'
-    
-    # 🟢 WhatsApp Link redirection
-    wa_link = get_whatsapp_link(phone)
-    if wa_link:
-        phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
-    else:
-        phone_display_html = f'<span class="blank">{phone_display}</span>'
-
-    # Render each record inside a clean bordered container
-    with st.container(border=True):
-        col_avatar, col_fields = st.columns([1.5, 3.5])
+if current_view == "csm":
+    st.markdown("### 👤 CSM Directory")
+    if st.button("⬅ Back to Clients"):
+        st.query_params.clear()
+        st.rerun()
         
-        with col_avatar:
-            avatar_html = f"""
-            <div style="display: flex; align-items: center; gap: 14px; margin-top: 5px;">
-                <div class="avatar-circle">{initials}</div>
-                <div>
-                    <div class="csm-role-label">CSM</div>
-                    <div class="csm-name-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #1e293b;">{csm_name}</div>
-                    <div class="csm-company-subtitle" style="font-size: 13px; color: #64748b;">{company} <span class="csm-id-badge" style="background:#e0e7ff; color:#4f46e5; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; margin-left:6px;">ID {client_id}</span></div>
-                </div>
-            </div>
-            """
-            st.markdown(avatar_html, unsafe_allow_html=True)
-            
-        with col_fields:
-            fields_html = f"""
-            <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
-                <div>
-                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
-                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
-                </div>
-                <div>
-                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
-                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
-                </div>
-                <div>
-                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
-                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
-                </div>
-                <div>
-                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Product</div>
-                    <div style="font-size: 13.5px; color: #334155;">{product_val}</div>
-                </div>
-            </div>
-            """
-            st.markdown(fields_html, unsafe_allow_html=True)
+    # Compile a unique directory of CSMs from the spreadsheet
+    csm_directory = {}
+    for _, row in df.iterrows():
+        # Primary CSM
+        name1 = row.get("csm_name_1", "").strip()
+        email1 = row.get("csm_email_1", "").strip()
+        phone1 = row.get("csm_contact_1", "").strip()
+        slack1 = row.get("csm_slack_1", "").strip()
+        if name1:
+            if name1 not in csm_directory or (not csm_directory[name1]["email"] and email1):
+                csm_directory[name1] = {"email": email1, "phone": phone1, "slack": slack1}
+                
+        # Secondary CSM
+        name2 = row.get("csm_name_2", "").strip()
+        email2 = row.get("csm_email_2", "").strip()
+        phone2 = row.get("csm_contact_2", "").strip()
+        slack2 = row.get("csm_slack_2", "").strip()
+        if name2:
+            if name2 not in csm_directory or (not csm_directory[name2]["email"] and email2):
+                csm_directory[name2] = {"email": email2, "phone": phone2, "slack": slack2}
 
-# ─── Pagination Controls ───
-if total_pages > 1:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-    col_prev, col_info, col_next = st.columns([1, 3, 1])
-    with col_prev:
-        if st.button("⬅ Previous", disabled=(st.session_state.page <= 1)):
-            st.session_state.page -= 1
+    # Convert to sorted list of dictionaries
+    csm_list = []
+    for name, info in sorted(csm_directory.items()):
+        csm_list.append({
+            "name": name,
+            "email": info["email"],
+            "phone": info["phone"],
+            "slack": info["slack"]
+        })
+
+    # Render CSM members
+    for csm in csm_list:
+        csm_name = csm["name"]
+        initials = get_initials(csm_name)
+        email = csm["email"]
+        phone = csm["phone"]
+        slack_id = csm["slack"]
+        
+        email_display = email if email else "Blank"
+        phone_display = phone if phone else "Blank"
+        
+        # 📧 Email Link redirection to Web Gmail compose
+        if email:
+            email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
+            email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
+        else:
+            email_display_html = f'<span class="blank">{email_display}</span>'
+        
+        # 💬 Slack Link redirection
+        if slack_id:
+            slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
+            slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+        else:
+            slack_display_html = '<span class="blank">Not Set</span>'
+        
+        # 🟢 WhatsApp Link redirection
+        wa_link = get_whatsapp_link(phone)
+        if wa_link:
+            phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
+        else:
+            phone_display_html = f'<span class="blank">{phone_display}</span>'
+
+        with st.container(border=True):
+            col_avatar, col_fields = st.columns([1.5, 3.5])
+            
+            with col_avatar:
+                avatar_html = f"""
+                <div style="display: flex; align-items: center; gap: 14px; margin-top: 5px;">
+                    <div class="avatar-circle">{initials}</div>
+                    <div>
+                        <div class="csm-role-label">CSM Member</div>
+                        <div class="csm-name-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #1e293b;">{csm_name}</div>
+                    </div>
+                </div>
+                """
+                st.markdown(avatar_html, unsafe_allow_html=True)
+                
+            with col_fields:
+                fields_html = f"""
+                <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
+                    </div>
+                </div>
+                """
+                st.markdown(fields_html, unsafe_allow_html=True)
+
+else:
+    # ─── Reset items_to_show on filter change ───
+    current_filter_hash = f"{selected_csm}-{selected_product}-{selected_search}-{current_view}"
+    if "prev_filter_hash" not in st.session_state:
+        st.session_state.prev_filter_hash = current_filter_hash
+
+    if st.session_state.prev_filter_hash != current_filter_hash:
+        st.session_state.items_to_show = 20
+        st.session_state.prev_filter_hash = current_filter_hash
+
+    if "items_to_show" not in st.session_state:
+        st.session_state.items_to_show = 20
+
+    # Slice the filtered dataframe based on infinite scroll limit
+    page_df = filtered_df.iloc[0:st.session_state.items_to_show]
+
+    # Render line-by-line (one per row)
+    for _, row in page_df.iterrows():
+        csm_name = row["csm_name_1"] if row["csm_name_1"] else "Unassigned"
+        initials = get_initials(csm_name)
+        company = row["legalName"] if row["legalName"] else "Unknown"
+        client_id = row["id"]
+        product_val = row["product"] if row["product"] else "N/A"
+        
+        email = row["csm_email_1"] if row["csm_email_1"] else ""
+        phone = row["csm_contact_1"] if row["csm_contact_1"] else ""
+        slack_id = row.get("csm_slack_1", "")
+        
+        email_display = email if email else "Blank"
+        phone_display = phone if phone else "Blank"
+        email_class = "" if email else "blank"
+        phone_class = "" if phone else "blank"
+        
+        # 📧 Email Link redirection to Web Gmail compose
+        if email:
+            email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
+            email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
+        else:
+            email_display_html = f'<span class="blank">{email_display}</span>'
+        
+        if slack_id:
+            slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
+            slack_display_html = f'<a href="{slack_link}" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+        else:
+            slack_display_html = '<span class="blank">Not Set</span>'
+        
+        # 🟢 WhatsApp Link redirection
+        wa_link = get_whatsapp_link(phone)
+        if wa_link:
+            phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
+        else:
+            phone_display_html = f'<span class="blank">{phone_display}</span>'
+
+        # Render each record inside a clean bordered container
+        with st.container(border=True):
+            col_avatar, col_fields = st.columns([1.5, 3.5])
+            
+            with col_avatar:
+                avatar_html = f"""
+                <div style="display: flex; align-items: center; gap: 14px; margin-top: 5px;">
+                    <div class="avatar-circle">{initials}</div>
+                    <div>
+                        <div class="csm-role-label">CSM</div>
+                        <div class="csm-name-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #1e293b;">{csm_name}</div>
+                        <div class="csm-company-subtitle" style="font-size: 13px; color: #64748b;">{company} <span class="csm-id-badge" style="background:#e0e7ff; color:#4f46e5; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; margin-left:6px;">ID {client_id}</span></div>
+                    </div>
+                </div>
+                """
+                st.markdown(avatar_html, unsafe_allow_html=True)
+                
+            with col_fields:
+                fields_html = f"""
+                <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
+                        <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Product</div>
+                        <div style="font-size: 13.5px; color: #334155;">{product_val}</div>
+                    </div>
+                </div>
+                """
+                st.markdown(fields_html, unsafe_allow_html=True)
+
+    # --- Infinite Scroll Loader ---
+    if st.session_state.items_to_show < len(filtered_df):
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+        if st.button("Load More Records...", key="load_more_btn", use_container_width=True):
+            st.session_state.items_to_show += 20
             st.rerun()
-    with col_info:
-        st.markdown(
-            f"<p style='text-align:center;color:#64748b;margin-top:8px;'>"
-            f"Page {st.session_state.page} of {total_pages}</p>",
-            unsafe_allow_html=True
-        )
-    with col_next:
-        if st.button("Next ➡", disabled=(st.session_state.page >= total_pages)):
-            st.session_state.page += 1
-            st.rerun()
+            
+        # Automatic Trigger Script
+        st.markdown("""
+        <script>
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    let buttons = document.querySelectorAll('button');
+                    if (buttons.length === 0) {
+                        buttons = window.parent.document.querySelectorAll('button');
+                    }
+                    for (const btn of buttons) {
+                        if (btn.textContent.includes('Load More Records')) {
+                            btn.click();
+                            break;
+                        }
+                    }
+                }
+            });
+        }, { threshold: 0.1 });
+
+        setTimeout(() => {
+            let buttons = document.querySelectorAll('button');
+            if (buttons.length === 0) {
+                buttons = window.parent.document.querySelectorAll('button');
+            }
+            for (const btn of buttons) {
+                if (btn.textContent.includes('Load More Records')) {
+                    observer.observe(btn);
+                    break;
+                }
+            }
+        }, 1000);
+        </script>
+        """, unsafe_allow_html=True)
