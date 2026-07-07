@@ -2,7 +2,11 @@ import streamlit as st
 import pandas as pd
 import os
 import math
-from data_loader import load_data, save_data, get_excel_path
+import importlib
+import data_loader
+importlib.reload(data_loader)
+from data_loader import load_data, save_data, get_excel_path, lookup_slack_id_by_email
+
 
 # ─── Page Configuration ───
 st.set_page_config(
@@ -12,14 +16,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ─── Configuration Constants ───
+EXCEL_PATH = get_excel_path()
+SLACK_WORKSPACE = "flick2know"  # Change this to your Slack workspace subdomain
+TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slack_token.txt")
+
+# ─── Load Slack Bot Token ───
+bot_token = ""
+if os.path.exists(TOKEN_FILE):
+    with open(TOKEN_FILE, "r") as f:
+        bot_token = f.read().strip()
+
 # ─── Load Custom CSS ───
 css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "style.css")
 if os.path.exists(css_path):
     with open(css_path) as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-# ─── Excel File Path ───
-EXCEL_PATH = get_excel_path()
 
 # ─── Session State ───
 if "page" not in st.session_state:
@@ -33,6 +45,27 @@ df = load_data(EXCEL_PATH)
 if df.empty:
     st.warning("⚠️ No data found. Place your Excel file in the project folder.")
     st.stop()
+
+# ─── Automatic Slack ID Lookup (using Slack Bot Token) ───
+if bot_token:
+    updated = False
+    for idx, row in df.iterrows():
+        # Check Primary CSM
+        if row["csm_email_1"] and not row["csm_slack_1"]:
+            resolved_id = lookup_slack_id_by_email(row["csm_email_1"], bot_token)
+            if resolved_id:
+                df.at[idx, "csm_slack_1"] = resolved_id
+                updated = True
+        # Check Secondary CSM
+        if row["csm_email_2"] and not row["csm_slack_2"]:
+            resolved_id = lookup_slack_id_by_email(row["csm_email_2"], bot_token)
+            if resolved_id:
+                df.at[idx, "csm_slack_2"] = resolved_id
+                updated = True
+                
+    if updated:
+        save_data(df, EXCEL_PATH)
+        st.toast("⚡ Automatically fetched and mapped missing Slack IDs using your token!")
 
 # ─── Build Filter Options ───
 all_csm_names = sorted(set(
@@ -63,7 +96,6 @@ if st.session_state.show_add_form:
     st.sidebar.markdown("### ➕ Add New CSM Details")
     with st.sidebar.form("add_csm_form", clear_on_submit=True):
         new_company = st.text_input("Company (Legal Name) *", placeholder="e.g. Acme Corp")
-        new_alias = st.text_input("Company Alias / Brand", placeholder="e.g. Acme")
         new_product = st.selectbox("Product", [""] + all_products)
         new_csm_name = st.text_input("Primary CSM Name *", placeholder="e.g. John Doe")
         
@@ -79,10 +111,13 @@ if st.session_state.show_add_form:
         else:
             new_csm_email = st.text_input("CSM Email", placeholder="e.g. john@company.com")
             
+        new_csm_slack = st.text_input("CSM Slack Member ID", placeholder="e.g. U05AB12CD")
+            
         st.markdown("**Secondary CSM (optional)**")
         new_csm2_name = st.text_input("Secondary Name", placeholder="Secondary CSM name")
         new_csm2_phone = st.text_input("Secondary Phone", placeholder="Phone number")
         new_csm2_email = st.text_input("Secondary Email", placeholder="Email address")
+        new_csm2_slack = st.text_input("Secondary Slack Member ID", placeholder="e.g. U05XY34YZ")
         
         st.markdown("**Lead (optional)**")
         new_lead_name = st.text_input("Lead Name", placeholder="Lead name")
@@ -100,7 +135,7 @@ if st.session_state.show_add_form:
                 new_row = {
                     "id": next_id,
                     "legalName": new_company,
-                    "aliasBrand": new_alias,
+                    "aliasBrand": "",
                     "product": new_product if new_product else "",
                     "csm_name_1": new_csm_name,
                     "csm_contact_1": new_csm_phone,
@@ -110,7 +145,9 @@ if st.session_state.show_add_form:
                     "csm_contact_2": new_csm2_phone,
                     "lead_name": new_lead_name,
                     "lead_contact": new_lead_phone,
-                    "lead_email": new_lead_email
+                    "lead_email": new_lead_email,
+                    "csm_slack_1": new_csm_slack,
+                    "csm_slack_2": new_csm2_slack
                 }
                 
                 updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
@@ -140,18 +177,19 @@ with st.sidebar.expander("✏️ Edit / Remove CSM"):
             if action == "Edit":
                 with st.form("edit_form"):
                     e_company = st.text_input("Company", value=row_data["legalName"])
-                    e_alias = st.text_input("Alias", value=row_data["aliasBrand"])
                     e_product = st.text_input("Product", value=row_data["product"])
                     e_csm1 = st.text_input("CSM Name", value=row_data["csm_name_1"])
                     e_phone1 = st.text_input("Phone", value=row_data["csm_contact_1"])
                     e_email1 = st.text_input("Email", value=row_data["csm_email_1"])
+                    e_slack1 = st.text_input("CSM Slack ID", value=row_data.get("csm_slack_1", ""))
+                    
                     e_csm2 = st.text_input("CSM 2 Name", value=row_data["csm_name_2"])
                     e_phone2 = st.text_input("CSM 2 Phone", value=row_data["csm_contact_2"])
                     e_email2 = st.text_input("CSM 2 Email", value=row_data["csm_email_2"])
+                    e_slack2 = st.text_input("CSM 2 Slack ID", value=row_data.get("csm_slack_2", ""))
                     
                     if st.form_submit_button("💾 Save Changes"):
                         df.at[row_idx, "legalName"] = e_company
-                        df.at[row_idx, "aliasBrand"] = e_alias
                         df.at[row_idx, "product"] = e_product
                         df.at[row_idx, "csm_name_1"] = e_csm1
                         df.at[row_idx, "csm_contact_1"] = e_phone1
@@ -159,6 +197,8 @@ with st.sidebar.expander("✏️ Edit / Remove CSM"):
                         df.at[row_idx, "csm_name_2"] = e_csm2
                         df.at[row_idx, "csm_contact_2"] = e_phone2
                         df.at[row_idx, "csm_email_2"] = e_email2
+                        df.at[row_idx, "csm_slack_1"] = e_slack1
+                        df.at[row_idx, "csm_slack_2"] = e_slack2
                         save_data(df, EXCEL_PATH)
                         st.success("✅ Updated!")
                         st.rerun()
@@ -170,6 +210,18 @@ with st.sidebar.expander("✏️ Edit / Remove CSM"):
                     save_data(df, EXCEL_PATH)
                     st.success("✅ Removed!")
                     st.rerun()
+
+st.sidebar.markdown("---")
+
+# ─── Slack Bot Token Config (sidebar expander) ───
+with st.sidebar.expander("🔌 Slack Auto-ID Lookup"):
+    st.markdown("<small>Paste a Slack Bot OAuth Token (starting with <code>xoxb-</code>) with the <code>users:read.email</code> scope to automatically look up and map Slack buttons by their email addresses.</small>", unsafe_allow_html=True)
+    new_token = st.text_input("Slack Token", value=bot_token, type="password", label_visibility="collapsed")
+    if st.button("💾 Save Token"):
+        with open(TOKEN_FILE, "w") as f:
+            f.write(new_token.strip())
+        st.success("Token saved!")
+        st.rerun()
 
 st.sidebar.markdown("---")
 csv = df.to_csv(index=False).encode("utf-8")
@@ -272,8 +324,27 @@ def get_initials(name):
     parts = name.split()
     return (parts[0][0] + parts[-1][0]).upper() if len(parts) >= 2 else name[0].upper()
 
+def get_whatsapp_link(phone):
+    if not phone or phone.strip() == "":
+        return None
+    # Keep only digits
+    cleaned = "".join([c for c in str(phone) if c.isdigit()])
+    if not cleaned:
+        return None
+    
+    # Strip leading zero if present (e.g. 09876543210 -> 9876543210)
+    if cleaned.startswith("0") and len(cleaned) == 11:
+        cleaned = cleaned[1:]
+        
+    # If it is a 10-digit number, prepend India country code 91
+    if len(cleaned) == 10:
+        cleaned = "91" + cleaned
+        
+    return f"https://wa.me/{cleaned}"
+
+
 # Pagination
-cards_per_page = 10  # Show more because they are line-by-line strips now!
+cards_per_page = 10
 total_pages = max(1, math.ceil(len(filtered_df) / cards_per_page))
 if st.session_state.page > total_pages:
     st.session_state.page = total_pages
@@ -291,13 +362,37 @@ for _, row in page_df.iterrows():
     
     email = row["csm_email_1"] if row["csm_email_1"] else ""
     phone = row["csm_contact_1"] if row["csm_contact_1"] else ""
+    slack_id = row.get("csm_slack_1", "")
     
     email_display = email if email else "Blank"
     phone_display = phone if phone else "Blank"
     email_class = "" if email else "blank"
-    phone_class = "" if phone else "blank"    # Render each record inside a clean bordered container
+    phone_class = "" if phone else "blank"
+    
+    # 📧 Email Link redirection to Web Gmail compose
+    if email:
+        email_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}"
+        email_display_html = f'<a href="{email_link}" target="_blank" style="text-decoration: none; color: #3b82f6; font-weight: 600;">{email_display} ↗</a>'
+    else:
+        email_display_html = f'<span class="blank">{email_display}</span>'
+    
+    # 💬 Slack Link redirection
+    if slack_id:
+        slack_link = f"https://{SLACK_WORKSPACE}.slack.com/team/{slack_id}"
+        slack_display_html = f'<a href="{slack_link}" target="_blank" style="text-decoration: none; color: #6366f1; font-weight: 600;">Open Chat ↗</a>'
+    else:
+        slack_display_html = '<span class="blank">Not Set</span>'
+    
+    # 🟢 WhatsApp Link redirection
+    wa_link = get_whatsapp_link(phone)
+    if wa_link:
+        phone_display_html = f'<a href="{wa_link}" target="_blank" style="text-decoration: none; color: #10b981; font-weight: 600;">{phone_display} ↗</a>'
+    else:
+        phone_display_html = f'<span class="blank">{phone_display}</span>'
+
+    # Render each record inside a clean bordered container
     with st.container(border=True):
-        col_avatar, col_fields, col_actions = st.columns([1.5, 2.5, 1.2])
+        col_avatar, col_fields = st.columns([1.5, 3.5])
         
         with col_avatar:
             avatar_html = f"""
@@ -317,11 +412,15 @@ for _, row in page_df.iterrows():
             <div style="display: flex; gap: 40px; margin-top: 10px; border-left: 1px solid #f1f5f9; padding-left: 20px;">
                 <div>
                     <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Email</div>
-                    <div class="csm-field-value {email_class}" style="font-size: 13.5px; color: #334155;">{email_display}</div>
+                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{email_display_html}</div>
                 </div>
                 <div>
                     <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Phone</div>
-                    <div class="csm-field-value {phone_class}" style="font-size: 13.5px; color: #334155;">{phone_display}</div>
+                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{phone_display_html}</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Slack</div>
+                    <div class="csm-field-value" style="font-size: 13.5px; color: #334155;">{slack_display_html}</div>
                 </div>
                 <div>
                     <div style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Product</div>
@@ -330,26 +429,6 @@ for _, row in page_df.iterrows():
             </div>
             """
             st.markdown(fields_html, unsafe_allow_html=True)
-            
-        with col_actions:
-            # Align the action buttons cleanly using custom HTML for client-side redirection
-            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-            email_btn_html = f'<a href="https://mail.google.com/mail/?view=cm&fs=1&to={email}" target="_blank" class="action-btn email-btn" style="text-decoration: none; color: inherit; width: 100%; display: inline-flex; justify-content: center; box-sizing: border-box;">📧 Email</a>' if email else '<div class="action-btn disabled-btn" style="width: 100%; display: inline-flex; justify-content: center; box-sizing: border-box;">📧 Email</div>'
-            slack_btn_html = '<div class="action-btn disabled-btn" style="width: 100%; display: inline-flex; justify-content: center; box-sizing: border-box; opacity: 0.5;">💬 Slack <span class="dummy-badge" style="font-size: 8px; background: #fbbf24; color: #78350f; padding: 1px 4px; border-radius: 4px; font-weight: 700; margin-left: 4px;">dummy</span></div>'
-            
-            actions_html = f"""
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <div style="flex: 1; display: flex;">
-                    {email_btn_html}
-                </div>
-                <div style="flex: 1; display: flex;">
-                    {slack_btn_html}
-                </div>
-            </div>
-            """
-            st.markdown(actions_html, unsafe_allow_html=True)
-   
-
 
 # ─── Pagination Controls ───
 if total_pages > 1:

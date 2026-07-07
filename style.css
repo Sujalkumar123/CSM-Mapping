@@ -200,6 +200,13 @@ body, .stApp {
     border-color: #6366f1 !important;
 }
 
+/* WhatsApp button hover */
+.whatsapp-btn:hover {
+    background: #25d366 !important;
+    color: #fff !important;
+    border-color: #25d366 !important;
+}
+
 /* Disabled button */
 .disabled-btn {
     opacity: 0.4;
