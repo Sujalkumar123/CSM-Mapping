@@ -1,0 +1,11 @@
+{
+  "name": "csm-dashboard-fullstack",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build:frontend": "npm install --prefix NewLayout/frontend && npm run build --prefix NewLayout/frontend",
+    "build:backend": "npm install --prefix NewLayout/backend",
+    "build": "npm run build:frontend && npm run build:backend",
+    "start": "node NewLayout/backend/server.js"
+  }
+}

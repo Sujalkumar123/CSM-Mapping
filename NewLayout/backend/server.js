@@ -12,6 +12,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from the React frontend build
+const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendBuildPath));
+
+
 // Target excel filepath (goes up to workspace root)
 const EXCEL_PATH = path.join(__dirname, '..', '..', 'csm_company_mappings (14).xlsx');
 
@@ -198,9 +203,20 @@ app.delete('/api/clients/:id', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+// For any other request, send the React index.html (SPA routing fallback)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexHtml = path.join(frontendBuildPath, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    res.sendFile(indexHtml);
+  } else {
+    res.send("React frontend build not found. Please build the frontend first.");
+  }
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Backend server running on http://127.0.0.1:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend server running on port ${PORT}`);
 });
