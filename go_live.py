@@ -15,7 +15,6 @@ for path in git_paths:
         git_path = path
         break
 
-import data_loader
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Configure Git username/email if not set
@@ -27,16 +26,10 @@ print("--- Starting Deploy Sequence ---")
 # 1. Add modified source files
 print("\n1. Staging changed files...")
 files_to_add = [
-    "Main.py", "data_loader.py", "style.css", "requirements.txt",
-    "go_live.py", "go_live.bat", "auto_lookup_slack.py", "auto_lookup_slack.bat",
-    "match_slack_export.py", "match_slack_export.bat", "slack_members.csv",
-    "patch_csm.py", "patch_csm.bat"
+    "go_live.py", "go_live.bat", "run_react_app.bat", "clean_project.bat",
+    "slack_members.csv", "csm_company_mappings (14).xlsx",
+    "NewLayout/frontend", "NewLayout/backend"
 ]
-
-# Dynamically add the resolved Excel mapping file
-excel_file = data_loader.get_excel_path()
-if excel_file and os.path.exists(excel_file):
-    files_to_add.append(os.path.basename(excel_file))
 
 for f in files_to_add:
     if os.path.exists(os.path.join(base_dir, f)):
@@ -44,7 +37,7 @@ for f in files_to_add:
 
 # 2. Commit
 print("\n2. Committing changes...")
-commit_msg = "Update CSM database mappings, hide headers, and update multi-contact card layout"
+commit_msg = "Rebuild CSM dashboard into full-stack React + Express web application"
 res_commit = subprocess.run([git_path, "commit", "-m", commit_msg], cwd=base_dir, capture_output=True, text=True)
 if res_commit.stdout:
     print(res_commit.stdout.strip())
