@@ -180,11 +180,70 @@ if df.empty:
 
 
 # ─── Build Filter Options ───
+all_primary_csms = sorted(set([n for n in df["csm_name_1"].unique().tolist() if n != ""]))
+all_secondary_csms = sorted(set([n for n in df["csm_name_2"].unique().tolist() if n != ""]))
+all_leads = sorted(set([n for n in df["lead_name"].unique().tolist() if n != ""]))
+all_products = sorted(set([p for p in df["product"].unique().tolist() if p != ""]))
+all_company_names = sorted(set([c for c in df["legalName"].unique().tolist() if c != ""]))
 all_csm_names = sorted(set(
     [n for n in df["csm_name_1"].unique().tolist() + df["csm_name_2"].unique().tolist() if n != ""]
 ))
-all_products = sorted(set([p for p in df["product"].unique().tolist() if p != ""]))
-all_company_names = sorted(set([c for c in df["legalName"].unique().tolist() if c != ""]))
+
+def clean_html(html_str):
+    return "\n".join([line.strip() for line in html_str.split("\n")])
+
+def get_initials(name):
+    if not name or name.strip() == "":
+        return "?"
+    parts = name.split()
+    return (parts[0][0] + parts[-1][0]).upper() if len(parts) >= 2 else name[0].upper()
+
+def get_whatsapp_link(phone):
+    if not phone or phone.strip() == "":
+        return None
+    # Keep only digits
+    cleaned = "".join([c for c in str(phone) if c.isdigit()])
+    if not cleaned:
+        return None
+    
+    # Strip leading zero if present (e.g. 09876543210 -> 9876543210)
+    if cleaned.startswith("0") and len(cleaned) == 11:
+        cleaned = cleaned[1:]
+        
+    # If it is a 10-digit number, prepend India country code 91
+    if len(cleaned) == 10:
+        cleaned = "91" + cleaned
+        
+    return f"https://wa.me/{cleaned}"
+
+# ─── Compile global CSM directory database ───
+csm_directory = {}
+for _, row in df.iterrows():
+    # Primary CSM
+    name1 = str(row.get("csm_name_1", "")).strip()
+    email1 = str(row.get("csm_email_1", "")).strip()
+    phone1 = str(row.get("csm_contact_1", "")).strip()
+    slack1 = str(row.get("csm_slack_1", "")).strip()
+    if name1 and name1.lower() != "nan" and name1.lower() != "unassigned" and name1 != "":
+        if name1 not in csm_directory or (not csm_directory[name1]["email"] and email1):
+            csm_directory[name1] = {"email": email1, "phone": phone1, "slack": slack1}
+            
+    # Secondary CSM
+    name2 = str(row.get("csm_name_2", "")).strip()
+    email2 = str(row.get("csm_email_2", "")).strip()
+    phone2 = str(row.get("csm_contact_2", "")).strip()
+    slack2 = str(row.get("csm_slack_2", "")).strip()
+    if name2 and name2.lower() != "nan" and name2.lower() != "unassigned" and name2 != "":
+        if name2 not in csm_directory or (not csm_directory[name2]["email"] and email2):
+            csm_directory[name2] = {"email": email2, "phone": phone2, "slack": slack2}
+            
+    # Account Lead
+    lead_name = str(row.get("lead_name", "")).strip()
+    lead_email = str(row.get("lead_email", "")).strip()
+    lead_phone = str(row.get("lead_contact", "")).strip()
+    if lead_name and lead_name.lower() != "nan" and lead_name.lower() != "unassigned" and lead_name != "":
+        if lead_name not in csm_directory or (not csm_directory[lead_name]["email"] and lead_email):
+            csm_directory[lead_name] = {"email": lead_email, "phone": lead_phone, "slack": ""}
 
 # ════════════════════════════════════════
 #  SIDEBAR (Filters & CSM Adding Form)
@@ -197,11 +256,7 @@ sort_option = st.sidebar.selectbox("Sort by", [
     "Company name (A-Z)", "Company name (Z-A)",
     "ID (Ascending)", "ID (Descending)"
 ])
-
 st.sidebar.markdown("---")
-
-
-
 
 # ─── ADD NEW CSM BUTTON (sidebar) ───
 if st.sidebar.button("➕ Add New CSM", use_container_width=True, type="primary"):
@@ -336,7 +391,22 @@ st.sidebar.download_button("📥 Download CSV", csv, "csm_directory.csv", "text/
 #  MAIN CONTENT AREA
 # ════════════════════════════════════════
 
-st.markdown("# 📋 CSM Directory")
+header_html = """
+<div style="display: flex; align-items: flex-start; gap: 16px; margin: 10px 0 25px 0; padding-bottom: 20px; border-bottom: 2px solid; border-image: linear-gradient(to right, #6366f1, #06b6d4, transparent) 1;">
+    <div style="font-size: 36px; background: linear-gradient(135deg, #e0e7ff, #c7d2fe); width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 16px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08); flex-shrink: 0;">
+        📋
+    </div>
+    <div>
+        <h1 style="margin: 0; font-size: 30px; font-weight: 800; background: linear-gradient(135deg, #1e293b, #4f46e5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1.2;">
+            CSM Directory
+        </h1>
+        <p style="margin: 4px 0 0 0; font-size: 13.5px; color: #64748b; font-weight: 500;">
+            Client mapping, communications & team assignments dashboard
+        </p>
+    </div>
+</div>
+"""
+st.markdown(header_html, unsafe_allow_html=True)
 
 # ─── KPI Metrics ───
 total_csms = len(all_csm_names)
@@ -346,19 +416,19 @@ missing_email = len(df[(df["csm_name_1"] != "") & (df["csm_email_1"] == "")])
 
 kpi_html = f"""
 <div class="kpi-container">
-    <a href="?view=clients" target="_self" class="kpi-card kpi-blue" style="text-decoration: none; color: #fff;">
+    <a href="?view=clients" target="_self" class="kpi-card kpi-blue" style="text-decoration: none;">
         <div class="kpi-title">Total Clients</div>
         <div class="kpi-value">{total_clients}</div>
     </a>
-    <a href="?view=csm" target="_self" class="kpi-card kpi-purple" style="text-decoration: none; color: #fff;">
+    <a href="?view=csm" target="_self" class="kpi-card kpi-purple" style="text-decoration: none;">
         <div class="kpi-title">Total CSM</div>
         <div class="kpi-value">{total_csms}</div>
     </a>
-    <a href="?view=missing_phone" target="_self" class="kpi-card kpi-orange" style="text-decoration: none; color: #fff;">
+    <a href="?view=missing_phone" target="_self" class="kpi-card kpi-orange" style="text-decoration: none;">
         <div class="kpi-title">Missing Phone</div>
         <div class="kpi-value">{missing_phone}</div>
     </a>
-    <a href="?view=missing_email" target="_self" class="kpi-card kpi-red" style="text-decoration: none; color: #fff;">
+    <a href="?view=missing_email" target="_self" class="kpi-card kpi-red" style="text-decoration: none;">
         <div class="kpi-title">Missing Email</div>
         <div class="kpi-value">{missing_email}</div>
     </a>
@@ -367,14 +437,228 @@ kpi_html = f"""
 st.markdown(kpi_html, unsafe_allow_html=True)
 
 # ─── Search Bar (Searchable Dropdown Selectbox) ───
-search_options = [""] + [f"🏢 {c}" for c in all_company_names] + [f"👤 {n}" for n in all_csm_names]
+search_options = ["🔍 Search by CSM or Company name..."] + [f"🏢 {c}" for c in all_company_names] + [f"👤 {n}" for n in all_csm_names]
 selected_search = st.selectbox(
     "🔍 Search",
     options=search_options,
     index=0,
-    placeholder="Search by CSM or Company name...",
     label_visibility="collapsed"
 )
+
+# ─── Bulk Messaging Panel ───
+st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+with st.expander("📣 Bulk Message Center", expanded=False):
+    # Step 1: Choose Recipients
+    st.markdown('<div class="stepper-header"><span class="step-number">1</span> Choose Recipients</div>', unsafe_allow_html=True)
+    col_p, col_s, col_l = st.columns(3)
+    with col_p:
+        selected_primaries = st.multiselect("Primary CSMs", options=all_primary_csms, placeholder="Select Primary CSMs")
+    with col_s:
+        selected_secondaries = st.multiselect("Secondary CSMs", options=all_secondary_csms, placeholder="Select Secondary CSMs")
+    with col_l:
+        selected_leads = st.multiselect("Account Leads", options=all_leads, placeholder="Select Account Leads")
+        
+    selected_bulk_csms = sorted(list(set(selected_primaries + selected_secondaries + selected_leads)))
+    
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+    
+    # Step 2: Write Message
+    st.markdown('<div class="stepper-header"><span class="step-number">2</span> Compose Message</div>', unsafe_allow_html=True)
+    message_content = st.text_area(
+        "Message Text",
+        placeholder="Type the message you want to send here...",
+        height=100,
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+    
+    # Step 3: Select Medium
+    st.markdown('<div class="stepper-header"><span class="step-number">3</span> Select Contact Medium</div>', unsafe_allow_html=True)
+    contact_medium = st.radio(
+        "Choose Contact Medium", 
+        ["Slack", "WhatsApp", "Email"], 
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    
+    # ── Step 4: The SEND Button (always visible) ──
+    st.markdown('<div class="stepper-header"><span class="step-number">4</span> Send Broadcast</div>', unsafe_allow_html=True)
+    
+    import urllib.parse
+    import json
+    import streamlit.components.v1 as components
+    
+    # Check readiness
+    has_recipients = len(selected_bulk_csms) > 0
+    has_message = message_content.strip() != ""
+    is_ready = has_recipients and has_message
+    
+    # Build links if ready
+    js_links = []
+    cards_html_list = []
+    
+    if is_ready:
+        encoded_message = urllib.parse.quote(message_content.strip())
+        
+        for name in selected_bulk_csms:
+            info = csm_directory.get(name)
+            if not info:
+                continue
+                
+            initials = get_initials(name)
+            email = info.get("email", "")
+            phone = info.get("phone", "")
+            slack_id = info.get("slack", "")
+            
+            if contact_medium == "Slack":
+                if slack_id:
+                    slack_link = f"slack://user?team=T041B4BGT&id={slack_id}"
+                    js_links.append(slack_link)
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #6366f1;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: linear-gradient(135deg, #6366f1, #818cf8);">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #64748b;">Slack ID: {slack_id}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                else:
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #ef4444; background: #fffbfb;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: #fecaca; color: #dc2626;">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #ef4444; font-weight: 600;">⚠ No Slack ID</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    
+            elif contact_medium == "WhatsApp":
+                wa_link = get_whatsapp_link(phone)
+                if wa_link:
+                    wa_send_link = f"{wa_link}?text={encoded_message}"
+                    js_links.append(wa_send_link)
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #25d366;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: linear-gradient(135deg, #25d366, #4ade80);">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #64748b;">📞 {phone}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                else:
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #ef4444; background: #fffbfb;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: #fecaca; color: #dc2626;">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #ef4444; font-weight: 600;">⚠ No Phone</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    
+            elif contact_medium == "Email":
+                if email:
+                    email_send_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email}&su=Notification&body={encoded_message}"
+                    js_links.append(email_send_link)
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #3b82f6;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: linear-gradient(135deg, #3b82f6, #60a5fa);">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #64748b; word-break: break-all;">✉ {email}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                else:
+                    card = f"""
+                    <div class="bulk-csm-card" style="border-top: 3px solid #ef4444; background: #fffbfb;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="avatar-circle" style="width: 32px; height: 32px; font-size: 11px; background: #fecaca; color: #dc2626;">{initials}</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px; color: #1e293b;">{name}</div>
+                                <div style="font-size: 11px; color: #ef4444; font-weight: 600;">⚠ No Email</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+            cards_html_list.append(card)
+        
+        # Show Selected Contacts Queue cards
+        st.markdown("<p style='font-size:12px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:4px;'>Selected Contacts Queue:</p>", unsafe_allow_html=True)
+        grid_html = f"""
+        <div class="bulk-grid">
+            {"".join(cards_html_list)}
+        </div>
+        """
+        st.markdown(clean_html(grid_html), unsafe_allow_html=True)
+        st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+    
+    # The SEND button - always visible
+    if not has_recipients and not has_message:
+        st.button("🚀 Send Broadcast", type="primary", use_container_width=True, disabled=True)
+        st.caption("⬆️ Select recipients and write a message to enable sending.")
+    elif not has_recipients:
+        st.button("🚀 Send Broadcast", type="primary", use_container_width=True, disabled=True)
+        st.caption("⬆️ Select at least one recipient to enable sending.")
+    elif not has_message:
+        st.button("🚀 Send Broadcast", type="primary", use_container_width=True, disabled=True)
+        st.caption("⬆️ Write a message to enable sending.")
+    elif len(js_links) == 0:
+        st.button("🚀 Send Broadcast", type="primary", use_container_width=True, disabled=True)
+        st.warning(f"⚠️ None of the selected contacts have valid {contact_medium} details.")
+    else:
+        send_clicked = st.button(
+            f"🚀 Send Message to All ({len(js_links)} contacts via {contact_medium})",
+            type="primary",
+            use_container_width=True
+        )
+        
+        if send_clicked:
+            js_links_json = json.dumps(js_links)
+            js_escaped_msg = message_content.strip().replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+            
+            js_code = f"""
+            <script>
+            (function() {{
+                const links = {js_links_json};
+                const message = `{js_escaped_msg}`;
+                
+                const el = document.createElement('textarea');
+                el.value = message;
+                el.style.position = 'fixed';
+                el.style.left = '-9999px';
+                parent.document.body.appendChild(el);
+                el.select();
+                parent.document.execCommand('copy');
+                parent.document.body.removeChild(el);
+                
+                links.forEach(function(link, index) {{
+                    setTimeout(function() {{
+                        parent.window.open(link, '_blank');
+                    }}, index * 800);
+                }});
+            }})();
+            </script>
+            """
+            components.html(js_code, height=0)
+            st.success(f"✅ Message copied to clipboard! Opening {len(js_links)} {contact_medium} window(s)...")
+
+
 
 # ════════════════════════════════════════
 #  FILTER + SORT DATA
@@ -395,7 +679,7 @@ if selected_csm != "All CSMs":
 if selected_product != "All Products":
     filtered_df = filtered_df[filtered_df["product"] == selected_product]
 
-if selected_search:
+if selected_search and selected_search != "🔍 Search by CSM or Company name...":
     q = selected_search[2:]  # Remove emoji prefix and space
     if selected_search.startswith("🏢"):
         filtered_df = filtered_df[filtered_df["legalName"] == q]
@@ -436,57 +720,12 @@ st.markdown(
 #  LINE-BY-LINE CSM MEMBER RENDERING
 # ════════════════════════════════════════
 
-def get_initials(name):
-    if not name or name.strip() == "":
-        return "?"
-    parts = name.split()
-    return (parts[0][0] + parts[-1][0]).upper() if len(parts) >= 2 else name[0].upper()
-
-def get_whatsapp_link(phone):
-    if not phone or phone.strip() == "":
-        return None
-    # Keep only digits
-    cleaned = "".join([c for c in str(phone) if c.isdigit()])
-    if not cleaned:
-        return None
-    
-    # Strip leading zero if present (e.g. 09876543210 -> 9876543210)
-    if cleaned.startswith("0") and len(cleaned) == 11:
-        cleaned = cleaned[1:]
-        
-    # If it is a 10-digit number, prepend India country code 91
-    if len(cleaned) == 10:
-        cleaned = "91" + cleaned
-        
-    return f"https://wa.me/{cleaned}"
-
 
 if current_view == "csm":
     st.markdown("### 👤 CSM Directory")
     if st.button("⬅ Back to Clients"):
         st.query_params.clear()
         st.rerun()
-        
-    # Compile a unique directory of CSMs from the spreadsheet
-    csm_directory = {}
-    for _, row in df.iterrows():
-        # Primary CSM
-        name1 = row.get("csm_name_1", "").strip()
-        email1 = row.get("csm_email_1", "").strip()
-        phone1 = row.get("csm_contact_1", "").strip()
-        slack1 = row.get("csm_slack_1", "").strip()
-        if name1:
-            if name1 not in csm_directory or (not csm_directory[name1]["email"] and email1):
-                csm_directory[name1] = {"email": email1, "phone": phone1, "slack": slack1}
-                
-        # Secondary CSM
-        name2 = row.get("csm_name_2", "").strip()
-        email2 = row.get("csm_email_2", "").strip()
-        phone2 = row.get("csm_contact_2", "").strip()
-        slack2 = row.get("csm_slack_2", "").strip()
-        if name2:
-            if name2 not in csm_directory or (not csm_directory[name2]["email"] and email2):
-                csm_directory[name2] = {"email": email2, "phone": phone2, "slack": slack2}
 
     # Convert to sorted list of dictionaries
     csm_list = []
@@ -555,11 +794,11 @@ if current_view == "csm":
             </div>
         </div>
         """
-        st.markdown(card_html, unsafe_allow_html=True)
+        st.markdown(clean_html(card_html), unsafe_allow_html=True)
 
 else:
     # ─── Reset items_to_show on filter change ───
-    current_filter_hash = f"{selected_csm}-{selected_product}-{selected_search}-{current_view}"
+    current_filter_hash = f"{selected_csm}-{selected_product}-{selected_search}-{current_view}-{sort_option}"
     if "prev_filter_hash" not in st.session_state:
         st.session_state.prev_filter_hash = current_filter_hash
 
@@ -736,7 +975,7 @@ else:
             </div>
         </div>
         """
-        st.markdown(card_html, unsafe_allow_html=True)
+        st.markdown(clean_html(card_html), unsafe_allow_html=True)
 
     # --- Infinite Scroll Loader ---
     if st.session_state.items_to_show < len(filtered_df):

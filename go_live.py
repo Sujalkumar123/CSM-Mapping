@@ -15,6 +15,7 @@ for path in git_paths:
         git_path = path
         break
 
+import data_loader
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Configure Git username/email if not set
@@ -31,13 +32,19 @@ files_to_add = [
     "match_slack_export.py", "match_slack_export.bat", "slack_members.csv",
     "patch_csm.py", "patch_csm.bat"
 ]
+
+# Dynamically add the resolved Excel mapping file
+excel_file = data_loader.get_excel_path()
+if excel_file and os.path.exists(excel_file):
+    files_to_add.append(os.path.basename(excel_file))
+
 for f in files_to_add:
     if os.path.exists(os.path.join(base_dir, f)):
         subprocess.run([git_path, "add", f], cwd=base_dir)
 
 # 2. Commit
 print("\n2. Committing changes...")
-commit_msg = "Remove alias feature & add Slack auto-matcher local scripts"
+commit_msg = "Update CSM database mappings, hide headers, and update multi-contact card layout"
 res_commit = subprocess.run([git_path, "commit", "-m", commit_msg], cwd=base_dir, capture_output=True, text=True)
 if res_commit.stdout:
     print(res_commit.stdout.strip())
