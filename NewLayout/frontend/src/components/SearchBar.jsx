@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { CLIENTS, getAllCsmNames } from '../data/clients';
 import { IconSearch } from './Icons';
 
-export default function SearchBar({ onSearch }) {
+export default function SearchBar({ onSearch, clientsList = [] }) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -19,11 +18,20 @@ export default function SearchBar({ onSearch }) {
   }, []);
 
   const ql = query.toLowerCase();
+  const getCsmNames = () => {
+    const names = new Set();
+    clientsList.forEach(c => {
+      if (c.csm1?.name) names.add(c.csm1.name);
+      if (c.csm2?.name) names.add(c.csm2.name);
+    });
+    return [...names].sort();
+  };
+
   const companies = query
-    ? [...new Set(CLIENTS.map(c => c.legalName))].filter(n => n.toLowerCase().includes(ql)).slice(0, 5)
+    ? [...new Set(clientsList.map(c => c.legalName))].filter(n => n.toLowerCase().includes(ql)).slice(0, 5)
     : [];
   const names = query
-    ? getAllCsmNames().filter(n => n.toLowerCase().includes(ql)).slice(0, 5)
+    ? getCsmNames().filter(n => n.toLowerCase().includes(ql)).slice(0, 5)
     : [];
   const hasResults = companies.length > 0 || names.length > 0;
 

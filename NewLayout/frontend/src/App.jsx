@@ -6,7 +6,6 @@ import ClientCard from './components/ClientCard';
 import RosterCard from './components/RosterCard';
 import BulkMessageCenter from './components/BulkMessageCenter';
 import AddCsmModal from './components/AddCsmModal';
-import { getInitials } from './data/clients';
 
 export default function App() {
   const [clientsList, setClientsList] = useState([]);
@@ -18,6 +17,7 @@ export default function App() {
   const [kpi, setKpi] = useState('clients');
   const [shown, setShown] = useState(6);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
 
   // Load clients data on mount
   useEffect(() => {
@@ -130,18 +130,71 @@ export default function App() {
     a.click();
   };
 
-  const handleSaveCsm = (newClient) => {
-    fetch('/api/clients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newClient)
-    })
-      .then(res => res.json())
-      .then(saved => {
-        setClientsList(prev => [...prev, saved]);
-        setIsModalOpen(false);
+  const handleEditClient = (id) => {
+    const target = clientsList.find(c => c.id === id);
+    if (target) {
+      setEditingClient(target);
+      setIsModalOpen(true);
+    }
+  };
+
+  const handleRemoveClient = (id) => {
+    const target = clientsList.find(c => c.id === id);
+    if (!target) return;
+
+    const confirmed = window.confirm(`Are you sure you want to remove the CSM assignment for "${target.legalName}" (ID ${id})?`);
+    if (confirmed) {
+      fetch(`/api/clients/${id}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setClientsList(prev => prev.filter(c => c.id !== id));
+          } else {
+            alert(`Failed to remove record: ${data.error || 'Unknown error'}`);
+          }
+        })
+        .catch(err => {
+          console.error("Error removing client:", err);
+          alert("Error removing client record from server.");
+        });
+    }
+  };
+
+  const handleSaveCsm = (clientData) => {
+    if (clientData.id) {
+      // Edit operation
+      fetch(`/api/clients/${clientData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(clientData)
       })
-      .catch(err => console.error("Error saving record:", err));
+        .then(res => res.json())
+        .then(saved => {
+          setClientsList(prev => prev.map(c => c.id === saved.id ? saved : c));
+          setIsModalOpen(false);
+          setEditingClient(null);
+        })
+        .catch(err => {
+          console.error("Error updating record:", err);
+          alert("Failed to update record.");
+        });
+    } else {
+      // Create operation
+      fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(clientData)
+      })
+        .then(res => res.json())
+        .then(saved => {
+          setClientsList(prev => [...prev, saved]);
+          setIsModalOpen(false);
+        })
+        .catch(err => {
+          console.error("Error saving record:", err);
+          alert("Failed to save new record.");
+        });
+    }
   };
 
   const pageTitles = {
@@ -168,8 +221,10 @@ export default function App() {
         onProductChange={setProduct}
         sort={sort}
         onSortChange={setSort}
-        onAddCsm={() => setIsModalOpen(true)}
+        onAddCsm={() => { setEditingClient(null); setIsModalOpen(true); }}
         onExportCsv={handleExportCsv}
+        onEditClient={handleEditClient}
+        onRemoveClient={handleRemoveClient}
         csmNames={getLiveCsmNames()}
         products={getLiveProducts()}
         clients={clientsList}
@@ -182,7 +237,7 @@ export default function App() {
             <p className="desc">{pageTitles[view][1]}</p>
           </div>
           {view !== 'bulk' && (
-            <SearchBar onSearch={setSearch} />
+            <SearchBar onSearch={setSearch} clientsList={clientsList} />
           )}
         </div>
 
@@ -233,7 +288,7 @@ export default function App() {
           <section id="view-csm">
             <div className="roster-grid">
               {roster.map(p => (
-                <RosterCard key={p.name} person={p} />
+                <RosterCard key={p.name} person={p} clientsList={clientsList} />
               ))}
             </div>
           </section>
@@ -246,8 +301,9 @@ export default function App() {
 
       <AddCsmModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => { setIsModalOpen(false); setEditingClient(null); }}
         onSave={handleSaveCsm}
+        editingClient={editingClient}
       />
     </div>
   );

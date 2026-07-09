@@ -104,8 +104,10 @@ export default function BulkMessageCenter({ clientsList = [], roster = [] }) {
                       checked={selected.has(p.name)}
                       onChange={e => handleSelectRow(p.name, e.target.checked)}
                     />
-                    <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--violet), #A78BFA)', color: '#fff' }}>
-                      {getInitials(p.name)}
+                    <div className="avatar-ring">
+                      <div className="avatar">
+                        {getInitials(p.name)}
+                      </div>
                     </div>
                     <div className="rinfo">
                       <div className="rname">{p.name}</div>
@@ -127,11 +129,11 @@ export default function BulkMessageCenter({ clientsList = [], roster = [] }) {
             ) : (
               [...selected].map(n => (
                 <span key={n} className="chip">
-                  <span className="avatar" style={{ background: 'linear-gradient(135deg, var(--violet), #A78BFA)', color: '#fff' }}>
+                  <span className="avatar" style={{ background: 'var(--violet)' }}>
                     {getInitials(n)}
                   </span>
                   {n}
-                  <button className="chip-remove" onClick={() => handleRemoveChip(n)}>✕</button>
+                  <span className="chip-remove" onClick={() => handleRemoveChip(n)}>✕</span>
                 </span>
               ))
             )}

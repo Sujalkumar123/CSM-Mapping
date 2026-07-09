@@ -3,7 +3,7 @@ import ContactBlock from './ContactBlock';
 export default function ClientCard({ client }) {
   const c = client;
   return (
-    <div className="card">
+    <div className={`card ${c.csm1?.name ? 'role-primary' : 'role-none'}`}>
       <div className="card-head">
         <div className="company">
           <span className="company-name">{c.legalName}</span>

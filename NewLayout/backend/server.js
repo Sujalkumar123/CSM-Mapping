@@ -203,6 +203,8 @@ app.delete('/api/clients/:id', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
 // For any other request, send the React index.html (SPA routing fallback)
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {

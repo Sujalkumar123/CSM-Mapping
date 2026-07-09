@@ -16,7 +16,9 @@ export default function ContactBlock({ roleLabel, person, kind }) {
   return (
     <div className={`contact ${kind}`}>
       <div className="contact-top">
-        <div className="avatar">{ini}</div>
+        <div className="avatar-ring">
+          <div className="avatar">{ini}</div>
+        </div>
         <div>
           <div className="contact-role">{roleLabel}</div>
           <div className="contact-name">{person.name}</div>

@@ -1,20 +1,19 @@
-import { getInitials, getWhatsAppLink, CLIENTS } from '../data/clients';
+import { getInitials, getWhatsAppLink } from '../data/clients';
 import { IconMail, IconPhone, IconSlack, IconCompose, IconWhatsApp } from './Icons';
 
-export default function RosterCard({ person }) {
+export default function RosterCard({ person, clientsList = [] }) {
   const p = person;
   const ini = getInitials(p.name);
   const wa = getWhatsAppLink(p.phone);
-  const load = CLIENTS.filter(c => c.csm1?.name === p.name || c.csm2?.name === p.name).length;
+  const load = clientsList.filter(c => c.csm1?.name === p.name || c.csm2?.name === p.name).length;
 
   return (
     <div className="roster-card">
       <div className="roster-top">
-        <div className="avatar" style={{
-          width: 42, height: 42, fontSize: 14,
-          background: 'linear-gradient(135deg, var(--cobalt), #5A78F0)'
-        }}>
-          {ini}
+        <div className="avatar-ring">
+          <div className="avatar">
+            {ini}
+          </div>
         </div>
         <div>
           <div className="name">{p.name}</div>
