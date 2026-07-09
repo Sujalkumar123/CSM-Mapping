@@ -54,20 +54,12 @@ export default function Sidebar({
           <span className="nav-count">{clients.length}</span>
         </div>
         <div
-          className={`nav-item ${view === 'csm' ? 'active' : ''}`}
-          onClick={() => onViewChange('csm')}
-        >
-          <IconPerson />
-          CSM Roster
-          <span className="nav-count">{csmNames.length}</span>
-        </div>
-        <div
-          className={`nav-item ${view === 'bulk' ? 'active bulk-active' : ''}`}
+          className={`nav-item ${view === 'bulk' ? 'active' : ''}`}
+          data-view="bulk"
           onClick={() => onViewChange('bulk')}
         >
           <IconSend />
-          Bulk Message
-          <span className="nav-badge">New</span>
+          Custom Message
         </div>
       </div>
 
@@ -103,23 +95,6 @@ export default function Sidebar({
               <option value="id-desc">ID (Descending)</option>
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Role Key Legend */}
-      <div className="legend">
-        <div className="nav-label" style={{ margin: '0 6px' }}>Role key</div>
-        <div className="legend-row">
-          <span className="dot d-cobalt" />
-          Primary CSM
-        </div>
-        <div className="legend-row">
-          <span className="dot d-teal" />
-          Secondary CSM
-        </div>
-        <div className="legend-row">
-          <span className="dot d-amber" />
-          Account lead
         </div>
       </div>
 
