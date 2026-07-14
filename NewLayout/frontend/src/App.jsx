@@ -7,6 +7,8 @@ import RosterCard from './components/RosterCard';
 import BulkMessageCenter from './components/BulkMessageCenter';
 import AddCsmModal from './components/AddCsmModal';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'https://csm-mapping-3.onrender.com';
+
 export default function App() {
   const [clientsList, setClientsList] = useState([]);
   const [view, setView] = useState('clients');
@@ -21,7 +23,7 @@ export default function App() {
 
   // Load clients data on mount
   useEffect(() => {
-    fetch('/api/clients')
+    fetch(`${API_BASE}/api/clients`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -144,7 +146,7 @@ export default function App() {
 
     const confirmed = window.confirm(`Are you sure you want to remove the CSM assignment for "${target.legalName}" (ID ${id})?`);
     if (confirmed) {
-      fetch(`/api/clients/${id}`, { method: 'DELETE' })
+      fetch(`${API_BASE}/api/clients/${id}`, { method: 'DELETE' })
         .then(res => res.json())
         .then(data => {
           if (data.success) {
@@ -163,7 +165,7 @@ export default function App() {
   const handleSaveCsm = (clientData) => {
     if (clientData.id) {
       // Edit operation
-      fetch(`/api/clients/${clientData.id}`, {
+      fetch(`${API_BASE}/api/clients/${clientData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(clientData)
@@ -180,7 +182,7 @@ export default function App() {
         });
     } else {
       // Create operation
-      fetch('/api/clients', {
+      fetch(`${API_BASE}/api/clients`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(clientData)
