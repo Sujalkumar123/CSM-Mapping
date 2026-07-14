@@ -28,6 +28,7 @@ print("\n1. Staging changed files...")
 files_to_add = [
     "go_live.py", "go_live.bat", "run_react_app.bat", "clean_project.bat",
     "slack_members.csv", "csm_company_mappings (14).xlsx",
+    "package.json", "package-lock.json", ".gitignore",
     "NewLayout/frontend", "NewLayout/backend"
 ]
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { IconClients, IconPerson, IconSend, IconPlus, IconDownload, IconEdit } from './Icons';
 
 export default function Sidebar({
@@ -14,20 +14,62 @@ export default function Sidebar({
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [selectedEditId, setSelectedEditId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
 
   const handleEditClick = () => {
-    const id = selectedEditId || (clients[0]?.id || '');
-    if (id) {
-      onEditClient(id);
+    if (!selectedEditId) {
+      alert("Please search and select a company first from the dropdown list.");
+      return;
     }
+    onEditClient(selectedEditId);
   };
 
   const handleRemoveClick = () => {
-    const id = selectedEditId || (clients[0]?.id || '');
-    if (id) {
-      onRemoveClient(id);
+    if (!selectedEditId) {
+      alert("Please search and select a company first from the dropdown list.");
+      return;
     }
+    onRemoveClient(selectedEditId);
   };
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    setSelectedEditId(''); // Clear selected ID since the text changed
+    setIsDropdownOpen(true);
+  };
+
+  const handleSelectClient = (c) => {
+    setSelectedEditId(c.id);
+    setSearchQuery(`[${c.id}] ${c.legalName}`);
+    setIsDropdownOpen(false);
+  };
+
+  // Filter dropdown recommendations dynamically (limit to 30 options)
+  const filteredOptions = clients
+    .filter(c => {
+      const q = searchQuery.toLowerCase();
+      if (!q) return true;
+      return (
+        c.legalName.toLowerCase().includes(q) ||
+        c.id.includes(q) ||
+        (c.csm1?.name || '').toLowerCase().includes(q)
+      );
+    })
+    .slice(0, 30);
 
   return (
     <aside className="sidebar">
@@ -104,18 +146,32 @@ export default function Sidebar({
           <IconEdit /> Edit / Remove CSM
         </summary>
         <div className="edit-panel-body">
-          <div className="select">
-            <select
-              id="edit-record-select"
-              value={selectedEditId || (clients[0]?.id || '')}
-              onChange={e => setSelectedEditId(e.target.value)}
-            >
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>
-                  [{c.id}] {c.legalName} ({c.csm1?.name || 'Unassigned'})
-                </option>
-              ))}
-            </select>
+          <div className="edit-search-wrap" ref={dropdownRef}>
+            <input
+              type="text"
+              className="edit-search-input"
+              placeholder="Search company to edit/remove..."
+              value={searchQuery}
+              onChange={handleInputChange}
+              onFocus={() => setIsDropdownOpen(true)}
+            />
+            {isDropdownOpen && (
+              <div className="edit-dropdown-panel">
+                {filteredOptions.length === 0 ? (
+                  <div className="edit-dropdown-empty">No matches found</div>
+                ) : (
+                  filteredOptions.map(c => (
+                    <div
+                      key={c.id}
+                      className="edit-dropdown-option"
+                      onClick={() => handleSelectClient(c)}
+                    >
+                      [{c.id}] {c.legalName} ({c.csm1?.name || 'Unassigned'})
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button

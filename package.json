@@ -7,5 +7,10 @@
     "build:backend": "npm install --prefix NewLayout/backend",
     "build": "npm run build:frontend && npm run build:backend",
     "start": "node NewLayout/backend/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "xlsx": "^0.18.5"
   }
 }
