@@ -15,6 +15,137 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
   const [whatsappQr, setWhatsappQr] = useState('');
   const [showQrModal, setShowQrModal] = useState(false);
 
+  // Email Cc/Bcc states
+  const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [ccSuggestions, setCcSuggestions] = useState([]);
+  const [showCcSuggestions, setShowCcSuggestions] = useState(false);
+  const [bccSuggestions, setBccSuggestions] = useState([]);
+  const [showBccSuggestions, setShowBccSuggestions] = useState(false);
+
+  const getEmailSuggestions = (value) => {
+    if (!value) return [];
+    const parts = value.split(',');
+    const lastPart = parts[parts.length - 1].trim();
+    if (lastPart.length < 2) return [];
+    
+    const q = lastPart.toLowerCase();
+    const matches = roster.filter(p => 
+      (p.email && p.email.toLowerCase().includes(q)) || 
+      p.name.toLowerCase().includes(q)
+    );
+    
+    const cleanName = lastPart.toLowerCase().split('@')[0].replace(/\s+/g, '.');
+    const orgDomains = ['flick2know.com', 'fieldassist.in', 'qartsolutions.com'];
+    const generated = [];
+    
+    if (cleanName.length > 2 && !lastPart.includes('@')) {
+      orgDomains.forEach(domain => {
+        const orgEmail = `${cleanName}@${domain}`;
+        const exists = matches.some(m => m.email && m.email.toLowerCase() === orgEmail.toLowerCase());
+        if (!exists) {
+          generated.push({
+            name: lastPart,
+            email: orgEmail,
+            type: 'generate'
+          });
+        }
+      });
+    }
+    
+    return [...matches.map(m => ({ ...m, type: 'roster' })), ...generated];
+  };
+
+  const selectCcSuggestion = (s) => {
+    const parts = cc.split(',');
+    parts[parts.length - 1] = s.email;
+    setCc(parts.join(', ') + ', ');
+    setShowCcSuggestions(false);
+  };
+
+  const selectBccSuggestion = (s) => {
+    const parts = bcc.split(',');
+    parts[parts.length - 1] = s.email;
+    setBcc(parts.join(', ') + ', ');
+    setShowBccSuggestions(false);
+  };
+
+  const renderEmailDropdown = (suggestions, onSelect, show) => {
+    if (!show || suggestions.length === 0) return null;
+    const colors = ['#0078d4', '#107c41', '#d83b01', '#8764b8', '#e3008c', '#00b7c3'];
+    const getBgColor = (name) => {
+      const idx = name.charCodeAt(0) % colors.length;
+      return colors[idx];
+    };
+    
+    return (
+      <div className="suggestions-dropdown" style={{
+        position: 'absolute',
+        top: '100%',
+        left: 0,
+        right: 0,
+        background: 'var(--surface)',
+        border: '1px solid var(--line-strong)',
+        borderRadius: 'var(--radius-md)',
+        boxShadow: 'var(--shadow-lg)',
+        zIndex: 20,
+        maxHeight: '180px',
+        overflowY: 'auto',
+        marginTop: '4px'
+      }}>
+        {suggestions.map((s, idx) => {
+          const initial = s.name ? s.name.charAt(0).toUpperCase() : s.email.charAt(0).toUpperCase();
+          const displayName = s.name || s.email.split('@')[0];
+          const bg = getBgColor(displayName);
+          
+          return (
+            <div
+              key={idx}
+              className="suggestion-item"
+              style={{
+                padding: '10px 14px',
+                cursor: 'pointer',
+                borderBottom: idx < suggestions.length - 1 ? '1px solid var(--line-faint)' : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                transition: 'background 0.15s ease'
+              }}
+              onMouseDown={() => onSelect(s)}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-under)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                background: bg,
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '600',
+                fontSize: '14px',
+                flexShrink: 0
+              }}>
+                {initial}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', lineHeight: '1.3' }}>
+                <span style={{ fontWeight: '600', fontSize: '13px', color: 'var(--ink)' }}>
+                  {displayName}
+                </span>
+                <span style={{ color: 'var(--ink-soft)', fontSize: '11px' }}>
+                  {s.email}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const filteredRoster = roster.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
   const allNames = roster.map(p => p.name);
   const isAllSelected = allNames.length > 0 && allNames.every(n => selected.has(n));
@@ -75,124 +206,152 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
     alert('Slack integration not active. Broadcast list + message copied to clipboard. Paste into Slack DMs.');
   };
 
-  const handleSend = () => {
+  const uploadAttachments = async () => {
+    if (attachments.length === 0) return [];
+    
+    const formData = new FormData();
+    attachments.forEach(file => {
+      formData.append('files', file);
+    });
+    
+    const res = await fetch(`${API_BASE}/api/attachments/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to upload attachments');
+    }
+    return data.files;
+  };
+
+  const handleSend = async () => {
     const activeRoster = roster.filter(p => selected.has(p.name));
     if (activeRoster.length === 0) {
       alert("Please select at least one recipient first.");
       return;
     }
 
-    if (channel === 'email') {
-      const emails = activeRoster.map(p => p.email).filter(Boolean);
-      const mailtoUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(emails.join(','))}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.open(mailtoUrl, '_blank');
-    } else if (channel === 'slack') {
-      setIsSending(true);
-      fetch(`${API_BASE}/api/slack/status`)
-        .then(res => res.json())
-        .then(status => {
-          if (status.configured && status.valid) {
-            const recipients = activeRoster
-              .map(p => ({ slackId: p.slack, name: p.name }))
-              .filter(r => r.slackId);
-            
-            if (recipients.length === 0) {
-              alert("None of the selected CSMs have Slack Member IDs mapped. Fallback: copying list to clipboard.");
-              fallbackSlackCopy(activeRoster);
-              setIsSending(false);
-              return;
-            }
+    setIsSending(true);
+    try {
+      // 1. Upload files first (if any)
+      const uploadedFiles = await uploadAttachments();
 
-            fetch(`${API_BASE}/api/slack/send-dm`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ recipients, message: body })
-            })
-              .then(res => res.json())
-              .then(data => {
-                if (data.success) {
-                  const sent = data.results.filter(r => r.success).length;
-                  const failed = data.results.filter(r => !r.success);
-                  
-                  if (failed.length > 0) {
-                    const failList = failed.map(f => `${f.name} (${f.error})`).join('\n');
-                    alert(`Sent Slack DMs to ${sent} CSMs. Failed for:\n${failList}`);
-                  } else {
-                    alert(`Successfully sent Slack DMs to all ${sent} selected CSMs!`);
-                  }
-                } else {
-                  alert(`Failed to send DMs: ${data.error || 'Unknown error'}`);
-                }
-              })
-              .catch(err => {
-                console.error("Error sending Slack DMs:", err);
-                alert("Error sending DMs via server. Fallback: copying list to clipboard.");
-                fallbackSlackCopy(activeRoster);
-              })
-              .finally(() => setIsSending(false));
-          } else {
+      // 2. Perform channel specific broadcasts
+      if (channel === 'email') {
+        const emails = activeRoster.map(p => p.email).filter(Boolean);
+        const bccEmails = [...emails];
+        if (bcc.trim()) {
+          bcc.split(',').map(e => e.trim()).filter(Boolean).forEach(e => bccEmails.push(e));
+        }
+
+        let emailBody = body;
+        if (uploadedFiles.length > 0) {
+          emailBody += '\n\nAttachments:';
+          uploadedFiles.forEach(f => {
+            emailBody += `\n- ${f.filename} (${f.url})`;
+          });
+        }
+
+        const mailtoUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails.join(','))}` +
+          (cc.trim() ? `&cc=${encodeURIComponent(cc.trim())}` : '') +
+          `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+        window.open(mailtoUrl, '_blank');
+        setIsSending(false);
+        setAttachments([]);
+      } else if (channel === 'slack') {
+        const statusRes = await fetch(`${API_BASE}/api/slack/status`);
+        const status = await statusRes.json();
+        
+        if (status.configured && status.valid) {
+          const recipients = activeRoster
+            .map(p => ({ slackId: p.slack, name: p.name }))
+            .filter(r => r.slackId);
+          
+          if (recipients.length === 0) {
+            alert("None of the selected CSMs have Slack Member IDs mapped. Fallback: copying list to clipboard.");
             fallbackSlackCopy(activeRoster);
-            setIsSending(false);
-          }
-        })
-        .catch(err => {
-          console.error("Error checking Slack status:", err);
-          fallbackSlackCopy(activeRoster);
-          setIsSending(false);
-        });
-    } else {
-      const targets = activeRoster.filter(p => p.phone);
-      if (targets.length === 0) {
-        alert("None of the selected CSMs have a phone number.");
-        return;
-      }
-      
-      setIsSending(true);
-      fetch(`${API_BASE}/api/whatsapp/status`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.status !== 'ready') {
-            setWhatsappStatus(data.status);
-            setWhatsappQr(data.qr);
-            setShowQrModal(true);
             setIsSending(false);
             return;
           }
 
-          const recipients = targets.map(p => ({ phone: p.phone, name: p.name }));
-          
-          fetch(`${API_BASE}/api/whatsapp/send`, {
+          const postRes = await fetch(`${API_BASE}/api/slack/send-dm`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recipients, message: body })
-          })
-            .then(res => res.json())
-            .then(sendData => {
-              if (sendData.success) {
-                const sent = sendData.results.filter(r => r.success).length;
-                const failed = sendData.results.filter(r => !r.success);
-                
-                if (failed.length > 0) {
-                  const failList = failed.map(f => `${f.name}: ${f.error}`).join('\n');
-                  alert(`Sent WhatsApp messages to ${sent} CSMs.\n\nFailed for:\n${failList}`);
-                } else {
-                  alert(`Successfully sent WhatsApp messages to all ${sent} selected CSMs!`);
-                }
-              } else {
-                alert(`Failed to send WhatsApp messages: ${sendData.error || 'Unknown error'}`);
-              }
-            })
-            .catch(err => {
-              console.error("Error sending WhatsApp background messages:", err);
-              alert("Network error sending WhatsApp messages.");
-            })
-            .finally(() => setIsSending(false));
-        })
-        .catch(err => {
-          console.error("Error checking WhatsApp status before sending:", err);
-          alert("Could not connect to backend to check WhatsApp status.");
+            body: JSON.stringify({ recipients, message: body, files: uploadedFiles })
+          });
+          const sendData = await postRes.json();
           setIsSending(false);
+          
+          if (sendData.success) {
+            const sent = sendData.results.filter(r => r.success).length;
+            const failed = sendData.results.filter(r => !r.success);
+            
+            if (failed.length > 0) {
+              const failList = failed.map(f => `${f.name} (${f.error})`).join('\n');
+              alert(`Sent Slack DMs to ${sent} CSMs. Failed for:\n${failList}`);
+            } else {
+              alert(`Successfully sent Slack DMs to all ${sent} selected CSMs with attachments!`);
+            }
+            setBody('');
+            setAttachments([]);
+          } else {
+            alert(`Failed to send DMs: ${sendData.error || 'Unknown error'}`);
+          }
+        } else {
+          fallbackSlackCopy(activeRoster);
+          setIsSending(false);
+        }
+      } else {
+        // WhatsApp channel
+        const targets = activeRoster.filter(p => p.phone);
+        if (targets.length === 0) {
+          alert("None of the selected CSMs have a phone number.");
+          setIsSending(false);
+          return;
+        }
+
+        const statusRes = await fetch(`${API_BASE}/api/whatsapp/status`);
+        const statusData = await statusRes.json();
+
+        if (statusData.status !== 'ready') {
+          setWhatsappStatus(statusData.status);
+          setWhatsappQr(statusData.qr);
+          setShowQrModal(true);
+          setIsSending(false);
+          return;
+        }
+
+        const recipients = targets.map(p => ({ phone: p.phone, name: p.name }));
+        
+        const postRes = await fetch(`${API_BASE}/api/whatsapp/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipients, message: body, files: uploadedFiles })
         });
+        const sendData = await postRes.json();
+        setIsSending(false);
+        
+        if (sendData.success) {
+          const sent = sendData.results.filter(r => r.success).length;
+          const failed = sendData.results.filter(r => !r.success);
+          
+          if (failed.length > 0) {
+            const failList = failed.map(f => `${f.name}: ${f.error}`).join('\n');
+            alert(`Sent WhatsApp messages to ${sent} CSMs.\n\nFailed for:\n${failList}`);
+          } else {
+            alert(`Successfully sent WhatsApp messages to all ${sent} selected CSMs natively with media attachments!`);
+          }
+          setBody('');
+          setAttachments([]);
+        } else {
+          alert(`Failed to send WhatsApp messages: ${sendData.error || 'Unknown error'}`);
+        }
+      }
+    } catch (err) {
+      console.error("Broadcast failed:", err);
+      alert("Broadcast failed: " + err.message);
+      setIsSending(false);
     }
   };
 
@@ -305,15 +464,65 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
 
           <div className="compose-card">
             {channel === 'email' && (
-              <div className="compose-field">
-                <label>Subject</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Q3 renewal checklist — action needed"
-                  value={subject}
-                  onChange={e => setSubject(e.target.value)}
-                />
-              </div>
+              <>
+                <div className="compose-field">
+                  <label>Subject</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Q3 renewal checklist — action needed"
+                    value={subject}
+                    onChange={e => setSubject(e.target.value)}
+                  />
+                </div>
+                <div className="form-row" style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                  <div className="compose-field" style={{ flex: 1, position: 'relative', margin: 0 }}>
+                    <label>Cc</label>
+                    <input
+                      type="text"
+                      placeholder="cc1@domain.com, cc2@domain.com"
+                      value={cc}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setCc(val);
+                        setCcSuggestions(getEmailSuggestions(val));
+                        setShowCcSuggestions(true);
+                      }}
+                      onFocus={() => {
+                        setCcSuggestions(getEmailSuggestions(cc));
+                        setShowCcSuggestions(true);
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setShowCcSuggestions(false), 200);
+                      }}
+                      autoComplete="off"
+                    />
+                    {renderEmailDropdown(ccSuggestions, selectCcSuggestion, showCcSuggestions)}
+                  </div>
+                  <div className="compose-field" style={{ flex: 1, position: 'relative', margin: 0 }}>
+                    <label>Bcc</label>
+                    <input
+                      type="text"
+                      placeholder="bcc1@domain.com, bcc2@domain.com"
+                      value={bcc}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setBcc(val);
+                        setBccSuggestions(getEmailSuggestions(val));
+                        setShowBccSuggestions(true);
+                      }}
+                      onFocus={() => {
+                        setBccSuggestions(getEmailSuggestions(bcc));
+                        setShowBccSuggestions(true);
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setShowBccSuggestions(false), 200);
+                      }}
+                      autoComplete="off"
+                    />
+                    {renderEmailDropdown(bccSuggestions, selectBccSuggestion, showBccSuggestions)}
+                  </div>
+                </div>
+              </>
             )}
             <div className="compose-field">
               <label>Message</label>
@@ -323,6 +532,99 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
                 onChange={e => setBody(e.target.value)}
               />
               <div className="char-count"><span>{body.length}</span> characters</div>
+            </div>
+            
+            <div className="compose-field" style={{ marginTop: '15px' }}>
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Attachments (Documents / Media)</span>
+                <span style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
+                  Max 5 files
+                </span>
+              </label>
+              <div style={{
+                border: '2px dashed var(--line-strong)',
+                borderRadius: 'var(--radius-md)',
+                padding: '16px',
+                textAlign: 'center',
+                background: 'var(--surface-under)',
+                cursor: 'pointer',
+                position: 'relative',
+                transition: 'border-color 0.2s ease'
+              }}
+              onClick={() => document.getElementById('file-attach-input').click()}
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--violet)'; }}
+              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--line-strong)'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = 'var(--line-strong)';
+                if (e.dataTransfer.files) {
+                  const newFiles = Array.from(e.dataTransfer.files);
+                  setAttachments(prev => [...prev, ...newFiles].slice(0, 5));
+                }
+              }}
+              >
+                <input
+                  type="file"
+                  id="file-attach-input"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    if (e.target.files) {
+                      const newFiles = Array.from(e.target.files);
+                      setAttachments(prev => [...prev, ...newFiles].slice(0, 5));
+                    }
+                  }}
+                />
+                <span style={{ fontSize: '13px', color: 'var(--ink-soft)' }}>
+                  Drag & drop files here or <span style={{ color: 'var(--violet)', fontWeight: '600' }}>browse</span>
+                </span>
+              </div>
+              
+              {attachments.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                  {attachments.map((file, idx) => (
+                    <div key={idx} style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      background: 'var(--violet-soft)',
+                      color: 'var(--violet)',
+                      padding: '4px 10px',
+                      borderRadius: '16px',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      gap: '6px'
+                    }}>
+                      <span style={{
+                        maxWidth: '120px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }} title={file.name}>
+                        {file.name}
+                      </span>
+                      <button 
+                        type="button"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--violet)',
+                          cursor: 'pointer',
+                          fontWeight: '700',
+                          fontSize: '14px',
+                          lineHeight: '1',
+                          padding: 0
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAttachments(prev => prev.filter((_, i) => i !== idx));
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="bulk-hint">
               <IconInfo />
@@ -396,6 +698,19 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
               <p style={{ fontSize: '13px', color: 'var(--ink-soft)', margin: 0, lineHeight: '1.45' }}>
                 Open WhatsApp on your phone, go to Linked Devices, and scan this QR code to authenticate.
               </p>
+              
+              <div style={{
+                background: 'rgba(235, 94, 40, 0.08)',
+                color: '#EB5E28',
+                padding: '10px 14px',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '11px',
+                fontWeight: '500',
+                lineHeight: '1.4',
+                border: '1px solid rgba(235, 94, 40, 0.2)'
+              }}>
+                ⚠️ <b>Do NOT scan with your phone's camera app.</b> You must scan this from within the WhatsApp app: Settings → Linked Devices → Link a Device.
+              </div>
               
               {whatsappStatus === 'loading' ? (
                 <div style={{ padding: '40px 0', color: 'var(--ink-soft)' }}>

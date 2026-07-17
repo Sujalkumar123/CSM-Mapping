@@ -1,5 +1,5 @@
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -29,12 +29,36 @@ function getChromePath() {
 export function initWhatsApp() {
   console.log("Initializing WhatsApp background client...");
   
-  const chromePath = getChromePath();
+  // Auto-clean any stale Chromium lock files left by crashed previous runs
+  const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session');
+  const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+  lockFiles.forEach(f => {
+    const lockPath = path.join(sessionDir, f);
+    try {
+      if (fs.existsSync(lockPath)) {
+        fs.unlinkSync(lockPath);
+        console.log(`Cleaned up stale lock file: ${f}`);
+      }
+    } catch (e) {
+      // Ignore errors if file is not deletable
+    }
+  });
+  
   const puppeteerOpts = {
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
   };
   
+  // Use system Chrome for best compatibility on Windows
+  const chromePath = getChromePath();
   if (chromePath) {
     console.log(`Using system Chrome at: ${chromePath}`);
     puppeteerOpts.executablePath = chromePath;
@@ -108,13 +132,22 @@ export async function sendWhatsAppMessage(phone, text) {
   }
   
   const whatsappId = `${cleanPhone}@c.us`;
-  
-  // Verify if number is registered on WhatsApp
-  const isRegistered = await client.isRegisteredUser(whatsappId);
-  if (!isRegistered) {
-    return { success: false, error: 'No WhatsApp account found for this number.' };
+  await client.sendMessage(whatsappId, text);
+  return { success: true };
+}
+
+export async function sendWhatsAppMedia(phone, filePath, filename) {
+  if (clientStatus !== 'ready') {
+    throw new Error('WhatsApp client is not connected.');
   }
 
-  await client.sendMessage(whatsappId, text);
+  let cleanPhone = phone.replace(/\D/g, '');
+  if (cleanPhone.length === 10) {
+    cleanPhone = '91' + cleanPhone;
+  }
+  
+  const whatsappId = `${cleanPhone}@c.us`;
+  const media = MessageMedia.fromFilePath(filePath);
+  await client.sendMessage(whatsappId, media, { caption: filename });
   return { success: true };
 }

@@ -328,6 +328,7 @@ export default function App() {
         onClose={() => { setIsModalOpen(false); setEditingClient(null); }}
         onSave={handleSaveCsm}
         editingClient={editingClient}
+        roster={roster}
       />
 
       <SlackSyncModal

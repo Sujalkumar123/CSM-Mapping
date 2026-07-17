@@ -5,10 +5,28 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import https from 'https';
-import { initWhatsApp, getWhatsAppStatus, sendWhatsAppMessage } from './whatsapp.js';
+import multer from 'multer';
+import { initWhatsApp, getWhatsAppStatus, sendWhatsAppMessage, sendWhatsAppMedia } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ─── Multer Upload Configuration ───
+const uploadsPath = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+const upload = multer({ storage: storage });
 
 // ─── Environment Variables Loader ───
 try {
@@ -248,6 +266,7 @@ async function syncSlackIds(token) {
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(uploadsPath));
 
 // Serve static files from the React frontend build
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
@@ -524,12 +543,20 @@ app.post('/api/slack/send-dm', async (req, res) => {
       return res.status(400).json({ error: 'No Slack token configured. Please configure it first.' });
     }
     
-    const { recipients, message } = req.body;
+    const { recipients, message, files } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
       return res.status(400).json({ error: 'Recipients list is empty or invalid.' });
     }
     if (!message) {
       return res.status(400).json({ error: 'Message body is required.' });
+    }
+    
+    let fullText = message;
+    if (files && Array.isArray(files) && files.length > 0) {
+      fullText += '\n\n*Attachments:*';
+      files.forEach(f => {
+        fullText += `\n• <${f.url}|${f.filename}>`;
+      });
     }
     
     const results = [];
@@ -552,7 +579,7 @@ app.post('/api/slack/send-dm', async (req, res) => {
         // Post message
         const postRes = await slackApiCall(token, 'chat.postMessage', {}, 'POST', {
           channel: channelId,
-          text: message
+          text: fullText
         });
         
         if (!postRes.ok) {
@@ -575,7 +602,30 @@ app.post('/api/slack/send-dm', async (req, res) => {
   }
 });
 
-// 9. Get WhatsApp connection status
+// 9. Upload broadcast file attachments
+app.post('/api/attachments/upload', upload.array('files'), (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.json({ success: true, files: [] });
+    }
+    
+    const host = req.headers.host || `localhost:5001`;
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    
+    const files = req.files.map(f => ({
+      filename: f.originalname,
+      path: f.path,
+      mimetype: f.mimetype,
+      url: `${protocol}://${host}/uploads/${f.filename}`
+    }));
+    
+    res.json({ success: true, files });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10. Get WhatsApp connection status
 app.get('/api/whatsapp/status', (req, res) => {
   try {
     const statusData = getWhatsAppStatus();
@@ -585,10 +635,10 @@ app.get('/api/whatsapp/status', (req, res) => {
   }
 });
 
-// 10. Send WhatsApp direct messages in background
+// 11. Send WhatsApp direct messages in background (with optional native files)
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
-    const { recipients, message } = req.body;
+    const { recipients, message, files } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
       return res.status(400).json({ error: 'Recipients list is empty or invalid.' });
     }
@@ -611,12 +661,23 @@ app.post('/api/whatsapp/send', async (req, res) => {
       }
       
       try {
+        // Send message body
         const sendResult = await sendWhatsAppMessage(rec.phone, message);
-        results.push({
-          name: rec.name,
-          success: sendResult.success,
-          error: sendResult.error || null
-        });
+        if (!sendResult.success) {
+          throw new Error(sendResult.error);
+        }
+        
+        // Send files natively
+        if (files && Array.isArray(files) && files.length > 0) {
+          for (const f of files) {
+            const mediaResult = await sendWhatsAppMedia(rec.phone, f.path, f.filename);
+            if (!mediaResult.success) {
+              throw new Error(`Media upload failed: ${mediaResult.error}`);
+            }
+          }
+        }
+        
+        results.push({ name: rec.name, success: true });
       } catch (err) {
         console.error(`Error sending WhatsApp background message to ${rec.name}:`, err.message);
         results.push({ name: rec.name, success: false, error: err.message });
