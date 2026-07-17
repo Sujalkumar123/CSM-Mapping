@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { IconClients, IconPerson, IconSend, IconPlus, IconDownload, IconEdit } from './Icons';
+import { IconClients, IconPerson, IconSend, IconPlus, IconDownload, IconEdit, IconSlack } from './Icons';
 
 export default function Sidebar({
   view, onViewChange,
@@ -8,6 +8,7 @@ export default function Sidebar({
   sort, onSortChange,
   onAddCsm, onExportCsv,
   onEditClient, onRemoveClient,
+  onSlackSync,
   csmNames = [],
   products = [],
   clients = []
@@ -198,6 +199,9 @@ export default function Sidebar({
       <div className="sidebar-actions">
         <button className="btn btn-primary" onClick={onAddCsm}>
           <IconPlus /> Add new CSM
+        </button>
+        <button className="btn btn-ghost" onClick={onSlackSync} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--violet-ink)', borderColor: 'rgba(139,92,246,0.35)' }}>
+          <IconSlack size={14} stroke="var(--violet-ink)" strokeWidth="2.2" /> Sync Slack IDs
         </button>
         <button className="btn btn-ghost" onClick={onExportCsv}>
           <IconDownload /> Export CSV

@@ -6,8 +6,12 @@ import ClientCard from './components/ClientCard';
 import RosterCard from './components/RosterCard';
 import BulkMessageCenter from './components/BulkMessageCenter';
 import AddCsmModal from './components/AddCsmModal';
+import SlackSyncModal from './components/SlackSyncModal';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://csm-mapping-3.onrender.com';
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : 'https://csm-mapping-3.onrender.com');
 
 export default function App() {
   const [clientsList, setClientsList] = useState([]);
@@ -20,6 +24,7 @@ export default function App() {
   const [shown, setShown] = useState(6);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
+  const [isSlackModalOpen, setIsSlackModalOpen] = useState(false);
 
   // Load clients data on mount
   useEffect(() => {
@@ -107,12 +112,28 @@ export default function App() {
     return list;
   };
 
+  const getFilteredRoster = () => {
+    let list = getLiveCsmDirectory();
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        (p.email && p.email.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  };
+
   const filtered = getFiltered();
-  const roster = getLiveCsmDirectory();
+  const roster = getFilteredRoster();
 
   const handleKpiClick = (key) => {
     setKpi(key);
-    setView('clients');
+    if (key === 'csm') {
+      setView('csm');
+    } else {
+      setView('clients');
+    }
     setShown(6);
   };
 
@@ -227,6 +248,7 @@ export default function App() {
         onExportCsv={handleExportCsv}
         onEditClient={handleEditClient}
         onRemoveClient={handleRemoveClient}
+        onSlackSync={() => setIsSlackModalOpen(true)}
         csmNames={getLiveCsmNames()}
         products={getLiveProducts()}
         clients={clientsList}
@@ -297,7 +319,7 @@ export default function App() {
         )}
 
         {view === 'bulk' && (
-          <BulkMessageCenter clientsList={clientsList} roster={roster} />
+          <BulkMessageCenter clientsList={clientsList} roster={roster} API_BASE={API_BASE} />
         )}
       </main>
 
@@ -306,6 +328,13 @@ export default function App() {
         onClose={() => { setIsModalOpen(false); setEditingClient(null); }}
         onSave={handleSaveCsm}
         editingClient={editingClient}
+      />
+
+      <SlackSyncModal
+        isOpen={isSlackModalOpen}
+        onClose={() => setIsSlackModalOpen(false)}
+        onSyncComplete={(updatedClients) => setClientsList(updatedClients)}
+        API_BASE={API_BASE}
       />
     </div>
   );
