@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
-import { initWhatsApp, getWhatsAppStatus, sendWhatsAppMessage, sendWhatsAppMedia } from './whatsapp.js';
+import { initWhatsApp, getWhatsAppStatus, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -284,10 +284,17 @@ const cleanColumns = [
   "csm_slack_1", "csm_slack_2"
 ];
 
-// Read and clean Excel data
-function readExcelData() {
+let clientsCache = null;
+
+// Read and clean Excel data (with in-memory caching)
+function readExcelData(forceReload = false) {
+  if (clientsCache && !forceReload) {
+    return clientsCache;
+  }
+
   if (!fs.existsSync(EXCEL_PATH)) {
-    return [];
+    clientsCache = [];
+    return clientsCache;
   }
 
   const workbook = XLSX.readFile(EXCEL_PATH);
@@ -296,13 +303,16 @@ function readExcelData() {
   
   // Get raw JSON rows
   const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-  if (rawRows.length === 0) return [];
+  if (rawRows.length === 0) {
+    clientsCache = [];
+    return clientsCache;
+  }
 
   // Remove header row
   const headers = rawRows[0];
   const rows = rawRows.slice(1);
 
-  return rows.map(row => {
+  clientsCache = rows.map(row => {
     const item = {};
     cleanColumns.forEach((col, index) => {
       let val = row[index];
@@ -348,10 +358,13 @@ function readExcelData() {
       }
     };
   });
+
+  return clientsCache;
 }
 
-// Write React schema items back to Excel
+// Write React schema items back to Excel and update cache
 function writeExcelData(clients) {
+  clientsCache = clients;
   const originalHeaders = [
     "id", "legalName", "aliasBrand", "product", 
     "CSM Name 1", "CSM Contact", "CSM EmailId", 
@@ -635,6 +648,38 @@ app.get('/api/whatsapp/status', (req, res) => {
   }
 });
 
+// 10a. Fetch chat history for a phone number
+app.get('/api/whatsapp/chat/:phone', async (req, res) => {
+  try {
+    const messages = await fetchChatHistory(req.params.phone);
+    res.json({ success: true, messages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10b. Poll for new stored messages (lightweight, no WhatsApp API call)
+app.get('/api/whatsapp/messages/:phone', (req, res) => {
+  try {
+    const messages = getStoredMessages(req.params.phone);
+    res.json({ success: true, messages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10c. Send a single message to one person
+app.post('/api/whatsapp/send-single', async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+    if (!phone || !message) return res.status(400).json({ error: 'phone and message required' });
+    const result = await sendWhatsAppMessage(phone, message);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 11. Send WhatsApp direct messages in background (with optional native files)
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
@@ -661,22 +706,37 @@ app.post('/api/whatsapp/send', async (req, res) => {
       }
       
       try {
-        // Send message body
-        const sendResult = await sendWhatsAppMessage(rec.phone, message);
-        if (!sendResult.success) {
-          throw new Error(sendResult.error);
-        }
-        
-        // Send files natively
-        if (files && Array.isArray(files) && files.length > 0) {
-          for (const f of files) {
-            const mediaResult = await sendWhatsAppMedia(rec.phone, f.path, f.filename);
-            if (!mediaResult.success) {
-              throw new Error(`Media upload failed: ${mediaResult.error}`);
+        const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+        const images = (files || []).filter(f => imageTypes.includes(f.mimetype));
+        const docs = (files || []).filter(f => !imageTypes.includes(f.mimetype));
+
+        if (images.length === 0 && docs.length === 0) {
+          // No files — send plain text only
+          const sendResult = await sendWhatsAppMessage(rec.phone, message);
+          if (!sendResult.success) throw new Error(sendResult.error);
+        } else {
+          // Send images with message text as caption
+          for (let i = 0; i < images.length; i++) {
+            const caption = i === 0 && docs.length === 0 ? message : (i === 0 ? message : '');
+            const r = await sendWhatsAppMedia(rec.phone, images[i].path, caption);
+            if (!r.success) throw new Error(r.error);
+          }
+
+          // If there are docs, send message text first (if no images already sent the text)
+          if (docs.length > 0) {
+            if (images.length === 0) {
+              // No images — send text first so recipient sees message + document separately
+              const sendResult = await sendWhatsAppMessage(rec.phone, message);
+              if (!sendResult.success) throw new Error(sendResult.error);
+            }
+            // Send each document with its own filename as caption
+            for (const doc of docs) {
+              const r = await sendWhatsAppMedia(rec.phone, doc.path, doc.filename);
+              if (!r.success) throw new Error(`Doc upload failed: ${r.error}`);
             }
           }
         }
-        
+
         results.push({ name: rec.name, success: true });
       } catch (err) {
         console.error(`Error sending WhatsApp background message to ${rec.name}:`, err.message);
@@ -709,5 +769,12 @@ app.get('*', (req, res, next) => {
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Backend server running on port ${PORT}`);
-  initWhatsApp();
+  // Warm up clients data cache immediately on server start
+  const initialData = readExcelData(true);
+  console.log(`Cached ${initialData.length} client records in memory.`);
+  
+  // Defer heavy WhatsApp background initialization so Express handles incoming HTTP requests immediately
+  setTimeout(() => {
+    initWhatsApp();
+  }, 1000);
 });

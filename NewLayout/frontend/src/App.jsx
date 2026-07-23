@@ -15,6 +15,7 @@ const API_BASE = import.meta.env.VITE_API_URL ||
 
 export default function App() {
   const [clientsList, setClientsList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState('clients');
   const [csm, setCsm] = useState('All CSMs');
   const [product, setProduct] = useState('All Products');
@@ -28,6 +29,7 @@ export default function App() {
 
   // Load clients data on mount
   useEffect(() => {
+    setLoading(true);
     fetch(`${API_BASE}/api/clients`)
       .then(res => res.json())
       .then(data => {
@@ -35,7 +37,8 @@ export default function App() {
           setClientsList(data);
         }
       })
-      .catch(err => console.error("Error loading clients:", err));
+      .catch(err => console.error("Error loading clients:", err))
+      .finally(() => setLoading(false));
   }, []);
 
   // Recalculate unique CSM names from live data
@@ -285,7 +288,17 @@ export default function App() {
 
         {view === 'clients' && (
           <section id="view-clients">
-            {filtered.length === 0 ? (
+            {loading ? (
+              <div className="cards">
+                {[1, 2, 3, 4, 5, 6].map(i => (
+                  <div key={i} className="skeleton-card">
+                    <div className="skeleton-title"></div>
+                    <div className="skeleton-badge"></div>
+                    <div className="skeleton-body"></div>
+                  </div>
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="empty-state">
                 <div className="glyph">🗂️</div>
                 <div className="title">No matching records</div>

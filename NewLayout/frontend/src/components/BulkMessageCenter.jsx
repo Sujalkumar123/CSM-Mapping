@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getInitials } from '../data/clients';
 import { IconSend, IconMail, IconSlack, IconWhatsApp, IconInfo, IconClose } from './Icons';
+import WhatsAppChatBox from './WhatsAppChatBox';
 
 export default function BulkMessageCenter({ clientsList = [], roster = [], API_BASE }) {
   const [selected, setSelected] = useState(new Set());
@@ -524,128 +525,166 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
                 </div>
               </>
             )}
-            <div className="compose-field">
-              <label>Message</label>
-              <textarea
-                placeholder="Write your update once — it goes out to everyone selected on the left."
-                value={body}
-                onChange={e => setBody(e.target.value)}
-              />
-              <div className="char-count"><span>{body.length}</span> characters</div>
-            </div>
-            
-            <div className="compose-field" style={{ marginTop: '15px' }}>
-              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Attachments (Documents / Media)</span>
-                <span style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
-                  Max 5 files
-                </span>
-              </label>
+            {/* Gmail-style compose box: textarea + bottom toolbar in one cont            {/* Dynamically render individual WhatsApp Chat Boxes if in WhatsApp channel & CSMs selected, else render normal compose box */}
+            {channel === 'whatsapp' && selected.size > 0 ? (
               <div style={{
-                border: '2px dashed var(--line-strong)',
-                borderRadius: 'var(--radius-md)',
-                padding: '16px',
-                textAlign: 'center',
-                background: 'var(--surface-under)',
-                cursor: 'pointer',
-                position: 'relative',
-                transition: 'border-color 0.2s ease'
-              }}
-              onClick={() => document.getElementById('file-attach-input').click()}
-              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--violet)'; }}
-              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--line-strong)'; }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.style.borderColor = 'var(--line-strong)';
-                if (e.dataTransfer.files) {
-                  const newFiles = Array.from(e.dataTransfer.files);
-                  setAttachments(prev => [...prev, ...newFiles].slice(0, 5));
-                }
-              }}
-              >
-                <input
-                  type="file"
-                  id="file-attach-input"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={e => {
-                    if (e.target.files) {
-                      const newFiles = Array.from(e.target.files);
-                      setAttachments(prev => [...prev, ...newFiles].slice(0, 5));
-                    }
-                  }}
-                />
-                <span style={{ fontSize: '13px', color: 'var(--ink-soft)' }}>
-                  Drag & drop files here or <span style={{ color: 'var(--violet)', fontWeight: '600' }}>browse</span>
-                </span>
+                maxHeight: '520px',
+                overflowY: 'auto',
+                paddingRight: '6px',
+                marginTop: '15px'
+              }}>
+                {roster.filter(p => selected.has(p.name)).map(p => (
+                  <WhatsAppChatBox key={p.name} person={p} API_BASE={API_BASE} />
+                ))}
               </div>
-              
-              {attachments.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                  {attachments.map((file, idx) => (
-                    <div key={idx} style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      background: 'var(--violet-soft)',
-                      color: 'var(--violet)',
-                      padding: '4px 10px',
-                      borderRadius: '16px',
-                      fontSize: '12px',
-                      fontWeight: '500',
-                      gap: '6px'
-                    }}>
-                      <span style={{
-                        maxWidth: '120px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }} title={file.name}>
-                        {file.name}
-                      </span>
-                      <button 
-                        type="button"
-                        style={{
-                          background: 'none',
-                          border: 'none',
+            ) : (
+              <div className="compose-field">
+                <label>Message</label>
+                <div style={{
+                  border: '1.5px solid var(--line-strong)',
+                  borderRadius: 'var(--radius-md)',
+                  overflow: 'hidden',
+                  background: 'var(--surface)',
+                  transition: 'border-color 0.2s ease',
+                  focusBorderColor: 'var(--violet)'
+                }}
+                onFocusCapture={e => e.currentTarget.style.borderColor = 'var(--violet)'}
+                onBlurCapture={e => e.currentTarget.style.borderColor = 'var(--line-strong)'}
+                >
+                  {/* Clean textarea — no icon inside */}
+                  <textarea
+                    placeholder="Write your update once — it goes out to everyone selected on the left."
+                    value={body}
+                    onChange={e => setBody(e.target.value)}
+                    style={{
+                      width: '100%',
+                      minHeight: '120px',
+                      border: 'none',
+                      outline: 'none',
+                      resize: 'vertical',
+                      padding: '12px 14px',
+                      fontSize: '13px',
+                      background: 'transparent',
+                      color: 'var(--ink)',
+                      fontFamily: 'inherit',
+                      boxSizing: 'border-box',
+                      display: 'block'
+                    }}
+                  />
+
+                  {/* Attached file chips */}
+                  {attachments.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '0 12px 8px' }}>
+                      {attachments.map((file, idx) => (
+                        <div key={idx} style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          background: 'var(--violet-soft)',
                           color: 'var(--violet)',
-                          cursor: 'pointer',
-                          fontWeight: '700',
-                          fontSize: '14px',
-                          lineHeight: '1',
-                          padding: 0
+                          padding: '3px 10px',
+                          borderRadius: '14px',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          gap: '5px'
+                        }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                          <span style={{ maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>
+                            {file.name}
+                          </span>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: 'var(--violet)', cursor: 'pointer', fontWeight: '700', fontSize: '13px', lineHeight: '1', padding: 0 }}
+                            onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))}
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Bottom toolbar: 📎 left | CSM count center | Send right */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 10px',
+                    borderTop: '1px solid var(--line-faint)',
+                    background: 'var(--surface-under)'
+                  }}>
+                    {/* LEFT: Paperclip icon */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {/* Hidden file input */}
+                      <input
+                        type="file"
+                        id="file-attach-input"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          if (e.target.files) {
+                            setAttachments(prev => [...prev, ...Array.from(e.target.files)].slice(0, 5));
+                          }
                         }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAttachments(prev => prev.filter((_, i) => i !== idx));
+                      />
+                      {/* Paperclip button */}
+                      <button
+                        type="button"
+                        title={`Attach files (${attachments.length}/5)`}
+                        onClick={() => document.getElementById('file-attach-input').click()}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: '30px', height: '30px',
+                          border: 'none', borderRadius: '50%',
+                          background: attachments.length > 0 ? 'var(--violet-soft)' : 'transparent',
+                          color: attachments.length > 0 ? 'var(--violet)' : 'var(--ink-soft)',
+                          cursor: 'pointer', transition: 'all 0.15s ease', position: 'relative'
                         }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.color = 'var(--ink)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = attachments.length > 0 ? 'var(--violet-soft)' : 'transparent'; e.currentTarget.style.color = attachments.length > 0 ? 'var(--violet)' : 'var(--ink-soft)'; }}
                       >
-                        ✕
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                        {attachments.length > 0 && (
+                          <span style={{
+                            position: 'absolute', top: '-2px', right: '-2px',
+                            background: 'var(--violet)', color: '#fff',
+                            fontSize: '8px', fontWeight: '700',
+                            width: '13px', height: '13px', borderRadius: '50%',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}>{attachments.length}</span>
+                        )}
                       </button>
                     </div>
-                  ))}
+
+                    {/* CENTER: Selected CSM count */}
+                    <span style={{ fontSize: '12px', color: 'var(--ink-soft)', fontWeight: '500' }}>
+                      {selected.size === 0
+                        ? 'No CSMs selected'
+                        : <><b style={{ color: 'var(--violet)' }}>{selected.size}</b> CSM{selected.size === 1 ? '' : 's'} selected</>
+                      }
+                    </span>
+
+                    {/* RIGHT: Send button */}
+                    <button
+                      className="btn btn-violet"
+                      style={{ padding: '7px 18px', fontSize: '13px', borderRadius: '20px', height: '34px' }}
+                      disabled={selected.size === 0 || isSending}
+                      onClick={handleSend}
+                    >
+                      <IconSend />
+                      {isSending ? 'Sending...' : 'Send'}
+                    </button>
+                  </div>
                 </div>
-              )}
+              </div>
+            )}
             </div>
+
             <div className="bulk-hint">
               <IconInfo />
               <span>{channelHints[channel]}</span>
             </div>
-            <div className="compose-footer">
-              <div className="send-summary">
-                Sending to <b>{selected.size}</b> CSM{selected.size === 1 ? '' : 's'}
-              </div>
-              <button
-                className="btn btn-violet"
-                disabled={selected.size === 0 || isSending}
-                onClick={handleSend}
-              >
-                <IconSend />
-                {isSending ? 'Sending...' : 'Send broadcast'}
-              </button>
-            </div>
           </div>
         </div>
-      </div>
 
       {/* WhatsApp QR Modal */}
       {showQrModal && (

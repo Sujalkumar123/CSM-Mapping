@@ -38,7 +38,7 @@ for f in files_to_add:
 
 # 2. Commit
 print("\n2. Committing changes...")
-commit_msg = "Rebuild CSM dashboard into full-stack React + Express web application"
+commit_msg = "Optimize backend response time: add in-memory Excel caching, defer WhatsApp init, and add UI skeleton loading state"
 res_commit = subprocess.run([git_path, "commit", "-m", commit_msg], cwd=base_dir, capture_output=True, text=True)
 if res_commit.stdout:
     print(res_commit.stdout.strip())
