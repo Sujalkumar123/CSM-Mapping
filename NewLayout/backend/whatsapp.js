@@ -63,17 +63,40 @@ function saveHistoryToDisk() {
   }
 }
 
-// Helper to find Chrome path on Windows
+import puppeteer from 'puppeteer';
+
+// Helper to find Chrome path on Windows & Linux (Render / Cloud servers)
 function getChromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH;
+  }
+
   const paths = [
+    // Windows
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     process.env.PROGRAMFILES + '\\Google\\Chrome\\Application\\chrome.exe',
-    process.env['PROGRAMFILES(X86)'] + '\\Google\\Chrome\\Application\\chrome.exe'
+    process.env['PROGRAMFILES(X86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
+    // Linux (Render, Heroku, Docker)
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium'
   ];
+
   for (const p of paths) {
     if (p && fs.existsSync(p)) return p;
   }
+
+  try {
+    const pPath = puppeteer.executablePath();
+    if (pPath && fs.existsSync(pPath)) return pPath;
+  } catch (e) {}
+
   return null;
 }
 
@@ -234,7 +257,8 @@ export function initWhatsApp() {
 
   client.initialize().catch(err => {
     console.error("Failed to initialize WhatsApp client:", err.message || err);
-    handleLogoutAndRestart('init_error: ' + (err.message || err));
+    clientStatus = 'disconnected';
+    qrCodeData = '';
   });
 }
 
