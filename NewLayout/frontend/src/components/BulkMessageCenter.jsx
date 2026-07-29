@@ -161,19 +161,36 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
           .then(data => {
             setWhatsappStatus(data.status);
             setWhatsappQr(data.qr);
+
+            // Immediately pop up QR modal as soon as QR image is generated & ready for scanning
+            if (channel === 'whatsapp' && data.status === 'qr' && data.qr && !showQrModal) {
+              setShowQrModal(true);
+            }
+
+            // Immediately close QR modal window as soon as scan completes & status becomes ready
             if (data.status === 'ready' && showQrModal) {
               setShowQrModal(false);
-              alert("WhatsApp integrated successfully! Ready to send direct background messages.");
+              setWhatsappQr('');
             }
           })
           .catch(err => console.error("Error checking WhatsApp status:", err));
       };
       
       check();
-      timer = setInterval(check, 3000);
+      timer = setInterval(check, showQrModal ? 1000 : 1500);
     }
     return () => clearInterval(timer);
   }, [channel, showQrModal, API_BASE]);
+
+  const handleResetWhatsapp = async () => {
+    try {
+      setWhatsappStatus('disconnected');
+      setWhatsappQr('');
+      await fetch(`${API_BASE}/api/whatsapp/reset`, { method: 'POST' });
+    } catch (e) {
+      console.error('Failed to reset WhatsApp session:', e);
+    }
+  };
 
   const handleSelectAll = (checked) => {
     const next = new Set(selected);
@@ -457,9 +474,19 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
             <button
               className={`channel-tab ${channel === 'whatsapp' ? 'active' : ''}`}
               onClick={() => setChannel('whatsapp')}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <IconWhatsApp />
               WhatsApp
+              <span style={{
+                display: 'inline-block',
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: whatsappStatus === 'ready' ? '#25D366' : whatsappStatus === 'qr' || whatsappStatus === 'loading' ? '#FFC107' : '#DC3545',
+                marginLeft: '4px',
+                transition: 'background-color 0.3s ease'
+              }} title={`WhatsApp status: ${whatsappStatus}`}></span>
             </button>
           </div>
 
@@ -534,7 +561,21 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
                 marginTop: '15px'
               }}>
                 {roster.filter(p => selected.has(p.name)).map(p => (
-                  <WhatsAppChatBox key={p.name} person={p} API_BASE={API_BASE} />
+                  <WhatsAppChatBox
+                    key={p.name}
+                    person={p}
+                    API_BASE={API_BASE}
+                    onRequestConnect={() => {
+                      fetch(`${API_BASE}/api/whatsapp/status`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setWhatsappStatus(data.status);
+                          setWhatsappQr(data.qr);
+                          setShowQrModal(true);
+                        })
+                        .catch(() => setShowQrModal(true));
+                    }}
+                  />
                 ))}
               </div>
             ) : (
@@ -788,9 +829,13 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
               borderTop: '1px solid var(--line-strong)',
               background: 'var(--surface-under)',
               display: 'flex',
-              justifyContent: 'flex-end',
+              justifyContent: 'space-between',
+              alignItems: 'center',
               gap: '8px'
             }}>
+              <button type="button" className="btn btn-ghost" style={{ color: '#eb5e28', fontSize: '12px' }} onClick={handleResetWhatsapp}>
+                🔄 Reset & Regenerate QR
+              </button>
               <button type="button" className="btn btn-ghost" onClick={() => setShowQrModal(false)}>Close</button>
             </div>
           </div>

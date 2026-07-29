@@ -77,6 +77,45 @@ function getChromePath() {
   return null;
 }
 
+let isRestarting = false;
+
+function handleLogoutAndRestart(reason) {
+  if (isRestarting) return;
+  isRestarting = true;
+  console.log('\n============================================================');
+  console.log(`  [WhatsApp Auto-Recovery] Disconnected (Reason: ${reason})`);
+  console.log(`  Cleaning session auth data and generating a new QR code...`);
+  console.log('============================================================\n');
+
+  clientStatus = 'loading';
+  qrCodeData = '';
+
+  // Safely cleanup old client instance non-blockingly
+  if (client) {
+    const oldClient = client;
+    client = null;
+    try {
+      oldClient.destroy().catch(() => {});
+    } catch (e) {}
+  }
+
+  // Delay 1.5 seconds so LocalAuth.logout() in whatsapp-web.js finishes its internal unlinking first
+  setTimeout(() => {
+    const authDir = path.join(__dirname, '.wwebjs_auth');
+    fs.rm(authDir, { recursive: true, force: true }, (err) => {
+      if (!err) {
+        console.log('[WhatsApp Auto-Recovery] Cleared stale session data directory.');
+      }
+      
+      // Re-initialize afresh
+      setTimeout(() => {
+        isRestarting = false;
+        initWhatsApp();
+      }, 500);
+    });
+  }, 1500);
+}
+
 export function initWhatsApp() {
   console.log("Initializing WhatsApp background client...");
   
@@ -85,18 +124,24 @@ export function initWhatsApp() {
   
   // Auto-clean any stale Chromium lock files left by crashed previous runs
   const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session');
-  const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
-  lockFiles.forEach(f => {
-    const lockPath = path.join(sessionDir, f);
-    try {
-      if (fs.existsSync(lockPath)) {
-        fs.unlinkSync(lockPath);
-        console.log(`Cleaned up stale lock file: ${f}`);
+  const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort'];
+  
+  const cleanLocks = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    lockFiles.forEach(f => {
+      const lockPath = path.join(dir, f);
+      try {
+        if (fs.existsSync(lockPath)) {
+          fs.unlinkSync(lockPath);
+          console.log(`Cleaned up stale lock file: ${f}`);
+        }
+      } catch (e) {
+        // Ignore errors if file is locked/not deletable
       }
-    } catch (e) {
-      // Ignore errors if file is not deletable
-    }
-  });
+    });
+  };
+  cleanLocks(sessionDir);
+  cleanLocks(path.join(sessionDir, 'Default'));
   
   const puppeteerOpts = {
     headless: true,
@@ -127,14 +172,16 @@ export function initWhatsApp() {
     puppeteer: puppeteerOpts
   });
 
-  client.on('qr', (qr) => {
-    clientStatus = 'qr';
-    qrcode.toDataURL(qr, (err, url) => {
-      if (!err) qrCodeData = url;
-    });
-    console.log('\n============================================================');
-    console.log('  [WhatsApp] QR Code generated! Scan it in the dashboard UI.');
-    console.log('============================================================\n');
+  client.on('qr', async (qr) => {
+    try {
+      qrCodeData = await qrcode.toDataURL(qr);
+      clientStatus = 'qr';
+      console.log('\n============================================================');
+      console.log('  [WhatsApp] QR Code generated! Scan it in the dashboard UI.');
+      console.log('============================================================\n');
+    } catch (err) {
+      console.error('Failed to convert QR code to data URL:', err.message);
+    }
   });
 
   client.on('ready', () => {
@@ -149,19 +196,13 @@ export function initWhatsApp() {
   });
 
   client.on('auth_failure', (msg) => {
-    clientStatus = 'disconnected';
-    qrCodeData = '';
     console.error('WhatsApp authentication failure:', msg);
+    handleLogoutAndRestart('auth_failure: ' + msg);
   });
 
   client.on('disconnected', (reason) => {
-    clientStatus = 'disconnected';
-    qrCodeData = '';
     console.log('WhatsApp client was disconnected:', reason);
-    // Attempt re-init
-    setTimeout(() => {
-      try { client.initialize(); } catch(e){}
-    }, 5000);
+    handleLogoutAndRestart('disconnected: ' + reason);
   });
 
   // Capture all messages (incoming & outgoing) created on this account
@@ -192,8 +233,8 @@ export function initWhatsApp() {
   });
 
   client.initialize().catch(err => {
-    console.error("Failed to initialize WhatsApp client:", err);
-    clientStatus = 'disconnected';
+    console.error("Failed to initialize WhatsApp client:", err.message || err);
+    handleLogoutAndRestart('init_error: ' + (err.message || err));
   });
 }
 
@@ -290,4 +331,10 @@ export function getStoredMessages(phone) {
   const now = Math.floor(Date.now() / 1000);
   const limit = now - 24 * 60 * 60;
   return (messageStore[cleanPhone] || []).filter(m => m.timestamp >= limit);
+}
+
+// Reset WhatsApp session completely (delete session dir & start fresh client)
+export async function resetWhatsApp() {
+  await handleLogoutAndRestart('manual_reset');
+  return { success: true };
 }

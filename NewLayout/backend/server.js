@@ -6,10 +6,19 @@ import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
-import { initWhatsApp, getWhatsAppStatus, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages } from './whatsapp.js';
+import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Prevent third-party background process errors from crashing Node server
+process.on('uncaughtException', (err) => {
+  console.error('[Background Warning Suppressed]:', err.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Unhandled Rejection Suppressed]:', reason?.message || reason);
+});
 
 // ─── Multer Upload Configuration ───
 const uploadsPath = path.join(__dirname, 'uploads');
@@ -643,6 +652,16 @@ app.get('/api/whatsapp/status', (req, res) => {
   try {
     const statusData = getWhatsAppStatus();
     res.json(statusData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10-reset. Reset & Regenerate WhatsApp Session QR Code
+app.post('/api/whatsapp/reset', async (req, res) => {
+  try {
+    const result = await resetWhatsApp();
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

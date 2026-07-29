@@ -21,7 +21,7 @@ function formatDateLabel(timestamp) {
   return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export default function WhatsAppChatBox({ person, API_BASE }) {
+export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -76,6 +76,19 @@ export default function WhatsAppChatBox({ person, API_BASE }) {
   const handleSend = async () => {
     if (!input.trim() || !phone || sending) return;
     const text = input.trim();
+
+    // Check status before sending
+    try {
+      const statusRes = await fetch(`${API_BASE}/api/whatsapp/status`);
+      const statusData = await statusRes.json();
+      if (statusData.status !== 'ready') {
+        if (onRequestConnect) onRequestConnect();
+        return;
+      }
+    } catch (e) {
+      console.warn("Status check failed:", e);
+    }
+
     setInput('');
     setSending(true);
 
@@ -97,13 +110,26 @@ export default function WhatsAppChatBox({ person, API_BASE }) {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to deliver message');
+        const errMsg = errData.error || 'Failed to deliver message';
+        // Remove optimistic bubble and restore text
+        setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+        setInput(text);
+        if (onRequestConnect) {
+          onRequestConnect();
+        } else {
+          alert(`Message delivery failed: ${errMsg}`);
+        }
+        return;
       }
     } catch (e) {
       console.error('Send failed:', e);
-      alert(`Message delivery failed: ${e.message}`);
-      // Remove optimistic bubble on failure
       setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+      setInput(text);
+      if (onRequestConnect) {
+        onRequestConnect();
+      } else {
+        alert(`Message delivery failed: ${e.message}`);
+      }
     } finally {
       setSending(false);
     }
