@@ -316,6 +316,13 @@ export async function initWhatsApp() {
   
   const puppeteerOpts = {
     headless: true,
+    // Default 30s timeout + silent Chrome stderr meant a launch failure on
+    // Render showed only Puppeteer's generic "WS endpoint never appeared" —
+    // the actual reason (missing shared lib, OOM, etc.) was never visible.
+    // dumpio pipes Chrome's real stderr into our own logs; the longer
+    // timeout gives a genuinely slow (not crashing) cold start room to finish.
+    timeout: 90000,
+    dumpio: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
