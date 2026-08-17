@@ -57,9 +57,9 @@ const ContactRow = memo(function ContactRow({ person, active, onSelect }) {
   );
 });
 
-export default function WhatsAppApp({ clientsList, API_BASE, whatsappStatus, onConnectWhatsApp }) {
+export default function WhatsAppApp({ clientsList, API_BASE, whatsappStatus, selectedKey, onSelectPerson, onConnectWhatsApp }) {
   const [query, setQuery] = useState('');
-  const [selectedKey, setSelectedKey] = useState(null);
+  const setSelectedKey = onSelectPerson;
   const [summaries, setSummaries] = useState({});
 
   const people = useMemo(

@@ -612,10 +612,10 @@ function OverviewFeeds({ people, API_BASE, onSelect }) {
   );
 }
 
-export default function UnifiedInbox({ clientsList, API_BASE, onConnectWhatsApp }) {
+export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSelectPerson, onConnectWhatsApp }) {
   const [query, setQuery] = useState('');
   const [deferredQuery, setDeferredQuery] = useState('');
-  const [selectedKey, setSelectedKey] = useState(null);
+  const setSelectedKey = onSelectPerson;
   const [threads, setThreads] = useState(null);
   const [loading, setLoading] = useState(false);
 

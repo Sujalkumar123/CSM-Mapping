@@ -17,15 +17,43 @@ const API_BASE = import.meta.env.VITE_API_URL ||
     ? 'http://localhost:5001'
     : 'https://csm-mapping-3.onrender.com');
 
+const VIEWS = ['clients', 'csm', 'inbox', 'whatsapp', 'bulk'];
+const KPIS = ['clients', 'csm', 'phone', 'email'];
+const SORTS = ['csm-az', 'csm-za', 'co-az', 'co-za', 'id-asc', 'id-desc'];
+
+// The URL is the source of truth for where you were, so a refresh lands back
+// on the same tab with the same filters instead of bouncing to Clients.
+// Everything is validated against a whitelist — a hand-edited ?view=garbage
+// would otherwise blow up the pageTitles lookup.
+function readUrlState() {
+  const p = new URLSearchParams(window.location.search);
+  const pick = (key, allowed, fallback) => {
+    const v = p.get(key);
+    return allowed.includes(v) ? v : fallback;
+  };
+  return {
+    view: pick('view', VIEWS, 'clients'),
+    kpi: pick('kpi', KPIS, 'clients'),
+    sort: pick('sort', SORTS, 'csm-az'),
+    csm: p.get('csm') || 'All CSMs',
+    product: p.get('product') || 'All Products',
+    search: p.get('q') || '',
+    person: p.get('person') || null
+  };
+}
+
+const initialUrl = readUrlState();
+
 export default function App() {
   const [clientsList, setClientsList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('clients');
-  const [csm, setCsm] = useState('All CSMs');
-  const [product, setProduct] = useState('All Products');
-  const [sort, setSort] = useState('csm-az');
-  const [search, setSearch] = useState('');
-  const [kpi, setKpi] = useState('clients');
+  const [view, setView] = useState(initialUrl.view);
+  const [csm, setCsm] = useState(initialUrl.csm);
+  const [product, setProduct] = useState(initialUrl.product);
+  const [sort, setSort] = useState(initialUrl.sort);
+  const [search, setSearch] = useState(initialUrl.search);
+  const [kpi, setKpi] = useState(initialUrl.kpi);
+  const [personKey, setPersonKey] = useState(initialUrl.person);
   const [shown, setShown] = useState(6);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
@@ -47,6 +75,22 @@ export default function App() {
       .catch(err => console.error("Error loading clients:", err))
       .finally(() => setLoading(false));
   }, []);
+
+  // Mirror navigation state into the query string. replaceState (not push)
+  // so filter tweaks don't pile up dozens of back-button entries.
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (view !== 'clients') p.set('view', view);
+    if (kpi !== 'clients') p.set('kpi', kpi);
+    if (sort !== 'csm-az') p.set('sort', sort);
+    if (csm !== 'All CSMs') p.set('csm', csm);
+    if (product !== 'All Products') p.set('product', product);
+    if (search) p.set('q', search);
+    if (personKey) p.set('person', personKey);
+
+    const qs = p.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, [view, kpi, sort, csm, product, search, personKey]);
 
   // One status poll shared by the sidebar badge and the connect modal,
   // instead of every consumer running its own interval
@@ -292,7 +336,7 @@ export default function App() {
             <p className="desc">{pageTitles[view][1]}</p>
           </div>
           {showDirectoryChrome && (
-            <SearchBar onSearch={setSearch} clientsList={clientsList} />
+            <SearchBar onSearch={setSearch} clientsList={clientsList} initialQuery={initialUrl.search} />
           )}
         </div>
 
@@ -363,6 +407,8 @@ export default function App() {
           <UnifiedInbox
             clientsList={clientsList}
             API_BASE={API_BASE}
+            selectedKey={personKey}
+            onSelectPerson={setPersonKey}
             onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
           />
         )}
@@ -372,6 +418,8 @@ export default function App() {
             clientsList={clientsList}
             API_BASE={API_BASE}
             whatsappStatus={whatsappStatus}
+            selectedKey={personKey}
+            onSelectPerson={setPersonKey}
             onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
           />
         )}

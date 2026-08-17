@@ -144,12 +144,24 @@ function getChromePath() {
 
 let isRestarting = false;
 
-function handleLogoutAndRestart(reason) {
+// Only a genuine unlink invalidates the stored session. A dropped network,
+// a sleeping laptop or a phone that went offline all raise 'disconnected'
+// too — wiping auth data for those means re-scanning a QR code over a blip,
+// which is the opposite of staying logged in.
+const UNRECOVERABLE = ['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE'];
+
+function isUnrecoverable(reason) {
+  return UNRECOVERABLE.some(r => String(reason || '').toUpperCase().includes(r));
+}
+
+function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
   if (isRestarting) return;
   isRestarting = true;
   console.log('\n============================================================');
   console.log(`  [WhatsApp Auto-Recovery] Disconnected (Reason: ${reason})`);
-  console.log(`  Cleaning session auth data and generating a new QR code...`);
+  console.log(wipeSession
+    ? '  Session is no longer valid — clearing auth data and issuing a new QR.'
+    : '  Reconnecting with the saved session (auth data kept).');
   console.log('============================================================\n');
 
   clientStatus = 'loading';
@@ -164,6 +176,19 @@ function handleLogoutAndRestart(reason) {
     } catch (e) {}
   }
 
+  const restart = () => {
+    setTimeout(() => {
+      isRestarting = false;
+      initWhatsApp();
+    }, 500);
+  };
+
+  if (!wipeSession) {
+    // Reconnect against the existing LocalAuth data — no re-scan needed
+    setTimeout(restart, 1500);
+    return;
+  }
+
   // Delay 1.5 seconds so LocalAuth.logout() in whatsapp-web.js finishes its internal unlinking first
   setTimeout(() => {
     const authDir = path.join(__dirname, '.wwebjs_auth');
@@ -171,12 +196,7 @@ function handleLogoutAndRestart(reason) {
       if (!err) {
         console.log('[WhatsApp Auto-Recovery] Cleared stale session data directory.');
       }
-      
-      // Re-initialize afresh
-      setTimeout(() => {
-        isRestarting = false;
-        initWhatsApp();
-      }, 500);
+      restart();
     });
   }, 1500);
 }
@@ -261,13 +281,14 @@ export function initWhatsApp() {
   });
 
   client.on('auth_failure', (msg) => {
+    // Stored credentials were rejected — the session really is dead
     console.error('WhatsApp authentication failure:', msg);
-    handleLogoutAndRestart('auth_failure: ' + msg);
+    handleLogoutAndRestart('auth_failure: ' + msg, { wipeSession: true });
   });
 
   client.on('disconnected', (reason) => {
     console.log('WhatsApp client was disconnected:', reason);
-    handleLogoutAndRestart('disconnected: ' + reason);
+    handleLogoutAndRestart('disconnected: ' + reason, { wipeSession: isUnrecoverable(reason) });
   });
 
   // Capture messages for CSM roster contacts only — this account is your
@@ -400,6 +421,7 @@ export function getStoredMessages(phone) {
 
 // Reset WhatsApp session completely (delete session dir & start fresh client)
 export async function resetWhatsApp() {
-  await handleLogoutAndRestart('manual_reset');
+  // Explicit user action from the UI — this one is meant to force a re-scan
+  await handleLogoutAndRestart('manual_reset', { wipeSession: true });
   return { success: true };
 }

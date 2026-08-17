@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { IconSearch } from './Icons';
 
-export default function SearchBar({ onSearch, clientsList = [] }) {
-  const [query, setQuery] = useState('');
+export default function SearchBar({ onSearch, clientsList = [], initialQuery = '' }) {
+  const [query, setQuery] = useState(initialQuery);
   const [isOpen, setIsOpen] = useState(false);
   const wrapRef = useRef(null);
 
