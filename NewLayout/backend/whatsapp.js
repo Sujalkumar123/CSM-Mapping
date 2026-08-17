@@ -16,6 +16,26 @@ let clientStatus = 'disconnected'; // 'disconnected', 'qr', 'loading', 'ready'
 const messageStore = {};
 const chatHistoryPath = path.join(__dirname, 'chat_history.json');
 
+function normalizePhone(phone) {
+  let clean = String(phone || '').replace(/\D/g, '');
+  if (clean.length === 10) clean = '91' + clean;
+  return clean;
+}
+
+// The dashboard's WhatsApp session is scoped to the CSM roster only — it
+// links your real WhatsApp account, but should behave like a fresh device
+// that only ever talks to the people you've named, not a mirror of every
+// personal chat on your phone. server.js keeps this in sync with the sheet.
+let rosterPhones = new Set();
+
+export function setRosterPhones(phones) {
+  rosterPhones = new Set((phones || []).map(normalizePhone).filter(Boolean));
+}
+
+function isRosterPhone(cleanPhone) {
+  return rosterPhones.has(cleanPhone);
+}
+
 // Safely clean JID to phone number, handling multi-device suffixes (e.g. '919999999999:1@c.us' -> '919999999999')
 function getCleanPhoneFromJid(jid) {
   if (!jid) return '';
@@ -228,12 +248,14 @@ export function initWhatsApp() {
     handleLogoutAndRestart('disconnected: ' + reason);
   });
 
-  // Capture all messages (incoming & outgoing) created on this account
+  // Capture messages for CSM roster contacts only — this account is your
+  // real WhatsApp, but the dashboard should only ever remember chats with
+  // the people you've named, not every personal conversation on your phone
   client.on('message_create', (msg) => {
     // Resolve the target phone number depending on whether the message is outgoing (to) or incoming (from)
     const targetJid = msg.fromMe ? msg.to : msg.from;
     const phone = getCleanPhoneFromJid(targetJid);
-    if (!phone) return;
+    if (!phone || !isRosterPhone(phone)) return;
 
     console.log(`[WhatsApp] Message event: ${msg.fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${msg.body || '(media)'}"`);
 
@@ -273,12 +295,11 @@ export async function sendWhatsAppMessage(phone, text) {
   if (clientStatus !== 'ready') {
     throw new Error('WhatsApp client is not connected.');
   }
-
-  let cleanPhone = phone.replace(/\D/g, '');
-  if (cleanPhone.length === 10) {
-    cleanPhone = '91' + cleanPhone;
+  const cleanPhone = normalizePhone(phone);
+  if (!isRosterPhone(cleanPhone)) {
+    throw new Error('This number is not on the CSM roster.');
   }
-  
+
   const whatsappId = `${cleanPhone}@c.us`;
   await client.sendMessage(whatsappId, text);
   return { success: true };
@@ -288,12 +309,11 @@ export async function sendWhatsAppMedia(phone, filePath, caption) {
   if (clientStatus !== 'ready') {
     throw new Error('WhatsApp client is not connected.');
   }
-
-  let cleanPhone = phone.replace(/\D/g, '');
-  if (cleanPhone.length === 10) {
-    cleanPhone = '91' + cleanPhone;
+  const cleanPhone = normalizePhone(phone);
+  if (!isRosterPhone(cleanPhone)) {
+    throw new Error('This number is not on the CSM roster.');
   }
-  
+
   const whatsappId = `${cleanPhone}@c.us`;
   const media = MessageMedia.fromFilePath(filePath);
   // Send media with the provided caption (message text or filename fallback)
@@ -301,10 +321,11 @@ export async function sendWhatsAppMedia(phone, filePath, caption) {
   return { success: true };
 }
 
-// Fetch real chat history from WhatsApp Web for a given phone number
+// Fetch real chat history from WhatsApp Web for a given phone number —
+// restricted to the CSM roster, so the dashboard never surfaces a personal chat
 export async function fetchChatHistory(phone) {
-  let cleanPhone = phone.replace(/\D/g, '');
-  if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+  const cleanPhone = normalizePhone(phone);
+  if (!isRosterPhone(cleanPhone)) return [];
   const whatsappId = `${cleanPhone}@c.us`;
 
   const now = Math.floor(Date.now() / 1000);
@@ -342,16 +363,14 @@ export async function fetchChatHistory(phone) {
     return messageStore[cleanPhone].filter(m => m.timestamp >= limit);
   } catch (e) {
     // Fallback to locally stored history
-    const rawPhone = phone.replace(/\D/g, '');
-    const key = rawPhone.length === 10 ? '91' + rawPhone : rawPhone;
-    return (messageStore[key] || []).filter(msg => msg.timestamp >= limit);
+    return (messageStore[cleanPhone] || []).filter(msg => msg.timestamp >= limit);
   }
 }
 
 // Get only in-memory messages (for polling new incoming, limited to 24 hours)
 export function getStoredMessages(phone) {
-  let cleanPhone = phone.replace(/\D/g, '');
-  if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+  const cleanPhone = normalizePhone(phone);
+  if (!isRosterPhone(cleanPhone)) return [];
   const now = Math.floor(Date.now() / 1000);
   const limit = now - 24 * 60 * 60;
   return (messageStore[cleanPhone] || []).filter(m => m.timestamp >= limit);

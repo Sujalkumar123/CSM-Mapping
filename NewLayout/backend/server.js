@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
-import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages } from './whatsapp.js';
+import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages, setRosterPhones } from './whatsapp.js';
 import { getEmailStatus, verifyEmailCreds, fetchEmailThread, sendEmail, resetEmailConnection, resetEmailTransport } from './email.js';
 import { cached, invalidate } from './cache.js';
 
@@ -449,12 +449,27 @@ function readExcelData(forceReload = false) {
     };
   });
 
+  syncWhatsAppRoster(clientsCache);
   return clientsCache;
+}
+
+// Keep the WhatsApp roster whitelist in lockstep with the sheet — every
+// reload and every write re-derives it, so a removed CSM stops being
+// reachable immediately rather than lingering in a stale allowlist.
+function syncWhatsAppRoster(clients) {
+  const phones = [];
+  clients.forEach(c => {
+    if (c.csm1?.phone) phones.push(c.csm1.phone);
+    if (c.csm2?.phone) phones.push(c.csm2.phone);
+    if (c.lead?.phone) phones.push(c.lead.phone);
+  });
+  setRosterPhones(phones);
 }
 
 // Write React schema items back to Excel and update cache
 function writeExcelData(clients) {
   clientsCache = clients;
+  syncWhatsAppRoster(clientsCache);
   const originalHeaders = [
     "id", "legalName", "aliasBrand", "product", 
     "CSM Name 1", "CSM Contact", "CSM EmailId", 
