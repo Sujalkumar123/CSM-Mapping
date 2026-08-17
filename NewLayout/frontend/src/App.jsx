@@ -7,6 +7,9 @@ import RosterCard from './components/RosterCard';
 import BulkMessageCenter from './components/BulkMessageCenter';
 import AddCsmModal from './components/AddCsmModal';
 import SlackSyncModal from './components/SlackSyncModal';
+import EmailConfigModal from './components/EmailConfigModal';
+import WhatsAppConnectModal from './components/WhatsAppConnectModal';
+import UnifiedInbox from './components/UnifiedInbox';
 
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -26,6 +29,9 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [isSlackModalOpen, setIsSlackModalOpen] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
 
   // Load clients data on mount
   useEffect(() => {
@@ -39,6 +45,20 @@ export default function App() {
       })
       .catch(err => console.error("Error loading clients:", err))
       .finally(() => setLoading(false));
+  }, []);
+
+  // One status poll shared by the sidebar badge and the connect modal,
+  // instead of every consumer running its own interval
+  useEffect(() => {
+    const check = () => {
+      fetch(`${API_BASE}/api/whatsapp/status`)
+        .then(res => res.json())
+        .then(data => setWhatsappStatus(data.status))
+        .catch(() => {});
+    };
+    check();
+    const timer = setInterval(check, 4000);
+    return () => clearInterval(timer);
   }, []);
 
   // Recalculate unique CSM names from live data
@@ -226,8 +246,11 @@ export default function App() {
   const pageTitles = {
     clients: ['Client & CSM directory', 'Find who owns an account and reach them in one tap.'],
     csm: ['CSM roster', 'Every CSM in one place, with their live account load.'],
-    bulk: ['Bulk message center', 'Message a whole segment of CSMs at once — one draft, every channel.']
+    bulk: ['Bulk message center', 'Message a whole segment of CSMs at once — one draft, every channel.'],
+    inbox: ['Inbox', 'WhatsApp, Slack and email with one person — side by side, no app switching.']
   };
+
+  const showDirectoryChrome = view !== 'bulk' && view !== 'inbox';
 
   const activeKpiNotes = {
     clients: '',
@@ -252,6 +275,9 @@ export default function App() {
         onEditClient={handleEditClient}
         onRemoveClient={handleRemoveClient}
         onSlackSync={() => setIsSlackModalOpen(true)}
+        onEmailConfig={() => setIsEmailModalOpen(true)}
+        onWhatsAppConnect={() => setIsWhatsAppModalOpen(true)}
+        whatsappStatus={whatsappStatus}
         csmNames={getLiveCsmNames()}
         products={getLiveProducts()}
         clients={clientsList}
@@ -263,12 +289,12 @@ export default function App() {
             <h1>{pageTitles[view][0]}</h1>
             <p className="desc">{pageTitles[view][1]}</p>
           </div>
-          {view !== 'bulk' && (
+          {showDirectoryChrome && (
             <SearchBar onSearch={setSearch} clientsList={clientsList} />
           )}
         </div>
 
-        {view !== 'bulk' && (
+        {showDirectoryChrome && (
           <KpiStrip
             activeKpi={kpi}
             onKpiClick={handleKpiClick}
@@ -277,7 +303,7 @@ export default function App() {
           />
         )}
 
-        {view !== 'bulk' && (
+        {showDirectoryChrome && (
           <div className="results-row">
             <div className="results-count">
               Showing <b>{view === 'clients' ? Math.min(shown, filtered.length) : roster.length}</b> of <b>{view === 'clients' ? filtered.length : roster.length}</b> records
@@ -331,6 +357,14 @@ export default function App() {
           </section>
         )}
 
+        {view === 'inbox' && (
+          <UnifiedInbox
+            clientsList={clientsList}
+            API_BASE={API_BASE}
+            onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
+          />
+        )}
+
         {view === 'bulk' && (
           <BulkMessageCenter clientsList={clientsList} roster={roster} API_BASE={API_BASE} />
         )}
@@ -348,6 +382,18 @@ export default function App() {
         isOpen={isSlackModalOpen}
         onClose={() => setIsSlackModalOpen(false)}
         onSyncComplete={(updatedClients) => setClientsList(updatedClients)}
+        API_BASE={API_BASE}
+      />
+
+      <EmailConfigModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        API_BASE={API_BASE}
+      />
+
+      <WhatsAppConnectModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
         API_BASE={API_BASE}
       />
     </div>

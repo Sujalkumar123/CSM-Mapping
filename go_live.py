@@ -38,7 +38,7 @@ for f in files_to_add:
 
 # 2. Commit
 print("\n2. Committing changes...")
-commit_msg = "Fix Render Puppeteer Chrome installation: add postinstall script to download Chrome binary automatically"
+commit_msg = "Fix Render build: add puppeteer and npx puppeteer browsers install chrome to root package.json"
 res_commit = subprocess.run([git_path, "commit", "-m", commit_msg], cwd=base_dir, capture_output=True, text=True)
 if res_commit.stdout:
     print(res_commit.stdout.strip())

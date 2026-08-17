@@ -7,6 +7,8 @@ import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
 import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages } from './whatsapp.js';
+import { getEmailStatus, verifyEmailCreds, fetchEmailThread, sendEmail, resetEmailConnection, resetEmailTransport } from './email.js';
+import { cached, invalidate } from './cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +37,20 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + '-' + file.originalname);
   }
 });
-const upload = multer({ storage: storage });
+// Gmail rejects messages over ~25MB, so cap well under it and stop junk early
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const BLOCKED_EXTENSIONS = /\.(exe|bat|cmd|com|scr|msi|dll|jar|vbs|ps1|sh)$/i;
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 10 },
+  fileFilter: (req, file, cb) => {
+    if (BLOCKED_EXTENSIONS.test(file.originalname)) {
+      return cb(new Error(`Executable files are not allowed: ${file.originalname}`));
+    }
+    cb(null, true);
+  }
+});
 
 // ─── Environment Variables Loader ───
 try {
@@ -60,6 +75,31 @@ try {
   }
 } catch (error) {
   console.error("Failed to load .env file:", error);
+}
+
+// Merge keys into .env without dropping unrelated ones already stored there
+function persistEnv(updates) {
+  const envPath = path.join(__dirname, '.env');
+  const existing = new Map();
+
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const index = trimmed.indexOf('=');
+      if (index !== -1) {
+        existing.set(trimmed.substring(0, index).trim(), trimmed.substring(index + 1).trim());
+      }
+    });
+  }
+
+  Object.entries(updates).forEach(([k, v]) => {
+    existing.set(k, v);
+    process.env[k] = v;
+  });
+
+  const content = [...existing.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+  fs.writeFileSync(envPath, content, 'utf8');
 }
 
 // ─── Slack API Helpers ───
@@ -105,6 +145,47 @@ function slackApiCall(token, endpoint, params = {}, method = 'GET', body = null)
     }
     
     req.end();
+  });
+}
+
+// Both of these are stable for the life of a token, so resolve them once
+// instead of on every history load.
+function getSlackSelfId(token) {
+  return cached(`slack:self:${token.slice(-8)}`, 60 * 60 * 1000, async () => {
+    const auth = await slackApiCall(token, 'auth.test');
+    if (!auth.ok) throw new Error(`auth.test: ${auth.error}`);
+    return auth.user_id;
+  });
+}
+
+function getSlackDmChannel(token, slackId) {
+  return cached(`slack:dm:${slackId}`, 60 * 60 * 1000, async () => {
+    const open = await slackApiCall(token, 'conversations.open', {}, 'POST', { users: slackId });
+    if (!open.ok) throw new Error(`conversations.open: ${open.error}`);
+    return open.channel.id;
+  });
+}
+
+async function getSlackHistory(token, slackId) {
+  return cached(`slackhist:${slackId}`, 30 * 1000, async () => {
+    // Channel id and self id resolve concurrently; neither depends on the other
+    const [channelId, selfId] = await Promise.all([
+      getSlackDmChannel(token, slackId),
+      getSlackSelfId(token)
+    ]);
+
+    const hist = await slackApiCall(token, 'conversations.history', { channel: channelId, limit: 30 });
+    if (!hist.ok) throw new Error(`conversations.history: ${hist.error}`);
+
+    return (hist.messages || [])
+      .filter(m => m.type === 'message' && !m.subtype)
+      .map(m => ({
+        id: m.ts,
+        body: m.text || '',
+        fromMe: m.user === selfId,
+        timestamp: Math.floor(parseFloat(m.ts))
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
   });
 }
 
@@ -523,11 +604,9 @@ app.post('/api/slack/config', async (req, res) => {
       return res.status(400).json({ error: `Invalid token: ${testData.error}` });
     }
     
-    process.env.SLACK_API_TOKEN = token;
-    
-    const envPath = path.join(__dirname, '.env');
-    fs.writeFileSync(envPath, `SLACK_API_TOKEN=${token}\n`, 'utf8');
-    
+    persistEnv({ SLACK_API_TOKEN: token });
+    invalidate('slack');
+
     res.json({
       success: true,
       team: testData.team,
@@ -624,8 +703,160 @@ app.post('/api/slack/send-dm', async (req, res) => {
   }
 });
 
+// 8a. Read DM history with one Slack user
+app.get('/api/slack/history/:slackId', async (req, res) => {
+  try {
+    const token = process.env.SLACK_API_TOKEN;
+    if (!token) {
+      return res.status(400).json({ error: 'No Slack token configured.' });
+    }
+
+    const messages = await getSlackHistory(token, req.params.slackId);
+    res.json({ success: true, messages });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// 8a-bis. One call for every channel at once — the three panels used to cost
+// three round-trips, and a slow one blocked nothing but itself.
+app.get('/api/inbox', async (req, res) => {
+  const { phone, slackId, email } = req.query;
+  const token = process.env.SLACK_API_TOKEN;
+
+  const settle = async (enabled, unavailable, run) => {
+    if (!enabled) return { available: false, reason: unavailable, messages: [] };
+    try {
+      return { available: true, messages: await run() };
+    } catch (err) {
+      return { available: true, error: err.message, messages: [] };
+    }
+  };
+
+  const [whatsapp, slack, mail] = await Promise.all([
+    settle(!!phone, 'No phone number on file', async () => {
+      const waStatus = getWhatsAppStatus();
+      if (waStatus.status !== 'ready') {
+        const err = new Error('NOT_CONNECTED');
+        err.code = 'NOT_CONNECTED';
+        throw err;
+      }
+      return fetchChatHistory(phone);
+    }),
+    settle(!!slackId, 'No Slack ID on file', async () => {
+      if (!token) throw new Error('No Slack token configured.');
+      return getSlackHistory(token, slackId);
+    }),
+    settle(!!email, 'No email address on file', async () => {
+      if (!getEmailStatus().configured) throw new Error('NOT_CONFIGURED');
+      return fetchEmailThread(email);
+    })
+  ]);
+
+  res.json({ success: true, whatsapp, slack, email: mail });
+});
+
+// 8b. Send one Slack DM
+app.post('/api/slack/send-single', async (req, res) => {
+  try {
+    const token = process.env.SLACK_API_TOKEN;
+    if (!token) {
+      return res.status(400).json({ error: 'No Slack token configured.' });
+    }
+
+    const { slackId, message } = req.body;
+    if (!slackId || !message) {
+      return res.status(400).json({ error: 'slackId and message are required.' });
+    }
+
+    const openRes = await slackApiCall(token, 'conversations.open', {}, 'POST', { users: slackId });
+    if (!openRes.ok) {
+      return res.status(400).json({ error: `conversations.open: ${openRes.error}` });
+    }
+
+    const postRes = await slackApiCall(token, 'chat.postMessage', {}, 'POST', {
+      channel: openRes.channel.id,
+      text: message
+    });
+    if (!postRes.ok) {
+      return res.status(400).json({ error: `chat.postMessage: ${postRes.error}` });
+    }
+
+    invalidate(`slackhist:${slackId}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 8c. Email integration status
+app.get('/api/email/status', (req, res) => {
+  res.json(getEmailStatus());
+});
+
+// 8d. Configure Gmail address + app password
+app.post('/api/email/config', async (req, res) => {
+  try {
+    const { user, appPassword } = req.body;
+    if (!user || !appPassword) {
+      return res.status(400).json({ error: 'user and appPassword are required.' });
+    }
+
+    const cleanPass = appPassword.replace(/\s/g, '');
+    await verifyEmailCreds(user, cleanPass);
+    persistEnv({ EMAIL_USER: user, EMAIL_APP_PASSWORD: cleanPass });
+
+    // Drop connections and cached mail bound to the previous account
+    resetEmailConnection();
+    resetEmailTransport();
+    invalidate('email:');
+    invalidate('imap:');
+
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(400).json({ error: `Could not sign in to Gmail: ${error.message}` });
+  }
+});
+
+// 8e. Read recent mail exchanged with one address
+app.get('/api/email/thread/:address', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 40, 200);
+    const messages = await fetchEmailThread(req.params.address, limit);
+    res.json({ success: true, messages, limit });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 8f. Send an email
+app.post('/api/email/send', async (req, res) => {
+  try {
+    const { to, cc, bcc, subject, body, inReplyTo, attachments } = req.body;
+    if ((!to && !bcc) || !body) {
+      return res.status(400).json({ error: 'A recipient and a message body are required.' });
+    }
+    const result = await sendEmail({ to, cc, bcc, subject, body, inReplyTo, attachments });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 9. Upload broadcast file attachments
-app.post('/api/attachments/upload', upload.array('files'), (req, res) => {
+app.post('/api/attachments/upload', (req, res, next) => {
+  upload.array('files')(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? `Each file must be under ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.`
+        : err.code === 'LIMIT_FILE_COUNT'
+          ? 'You can attach at most 10 files.'
+          : err.message;
+      return res.status(400).json({ error: msg });
+    }
+    next();
+  });
+}, (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.json({ success: true, files: [] });

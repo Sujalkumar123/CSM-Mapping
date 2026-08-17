@@ -148,7 +148,9 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
   };
 
   const filteredRoster = roster.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
-  const allNames = roster.map(p => p.name);
+  // Select-all acts on what the filter is actually showing — using the whole
+  // roster here meant a filtered-down view could still broadcast to everyone.
+  const allNames = filteredRoster.map(p => p.name);
   const isAllSelected = allNames.length > 0 && allNames.every(n => selected.has(n));
 
   // Poll WhatsApp status when channel is whatsapp or QR modal is active
@@ -249,6 +251,10 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
       alert("Please select at least one recipient first.");
       return;
     }
+    if (!body.trim()) {
+      alert("Please write a message before sending.");
+      return;
+    }
 
     setIsSending(true);
     try {
@@ -263,20 +269,58 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
           bcc.split(',').map(e => e.trim()).filter(Boolean).forEach(e => bccEmails.push(e));
         }
 
-        let emailBody = body;
-        if (uploadedFiles.length > 0) {
-          emailBody += '\n\nAttachments:';
-          uploadedFiles.forEach(f => {
-            emailBody += `\n- ${f.filename} (${f.url})`;
-          });
+        if (bccEmails.length === 0) {
+          alert("None of the selected CSMs have an email address.");
+          setIsSending(false);
+          return;
         }
 
-        const mailtoUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails.join(','))}` +
-          (cc.trim() ? `&cc=${encodeURIComponent(cc.trim())}` : '') +
-          `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-        window.open(mailtoUrl, '_blank');
+        const statusRes = await fetch(`${API_BASE}/api/email/status`);
+        const emailStatus = await statusRes.json().catch(() => ({}));
+
+        if (emailStatus.configured) {
+          // Send through the connected account so files travel as real
+          // attachments rather than links pasted into the body
+          const res = await fetch(`${API_BASE}/api/email/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bcc: bccEmails,
+              cc: cc.trim() ? cc.split(',').map(e => e.trim()).filter(Boolean) : [],
+              subject,
+              body,
+              attachments: uploadedFiles
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            alert(`Email failed: ${data.error || 'unknown error'}`);
+          } else {
+            const withFiles = uploadedFiles.length > 0
+              ? ` with ${uploadedFiles.length} attachment${uploadedFiles.length === 1 ? '' : 's'}`
+              : '';
+            alert(`Email sent to ${data.recipients} recipient${data.recipients === 1 ? '' : 's'}${withFiles}.`);
+            setAttachments([]);
+          }
+        } else {
+          // Gmail not connected — fall back to a compose window. Files cannot
+          // ride along this path, so they go as links.
+          let emailBody = body;
+          if (uploadedFiles.length > 0) {
+            emailBody += '\n\nAttachments:';
+            uploadedFiles.forEach(f => {
+              emailBody += `\n- ${f.filename} (${f.url})`;
+            });
+          }
+
+          const mailtoUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails.join(','))}` +
+            (cc.trim() ? `&cc=${encodeURIComponent(cc.trim())}` : '') +
+            `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+          window.open(mailtoUrl, '_blank');
+          setAttachments([]);
+        }
         setIsSending(false);
-        setAttachments([]);
       } else if (channel === 'slack') {
         const statusRes = await fetch(`${API_BASE}/api/slack/status`);
         const status = await statusRes.json();
@@ -792,12 +836,7 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
                 ⚠️ <b>Do NOT scan with your phone's camera app.</b> You must scan this from within the WhatsApp app: Settings → Linked Devices → Link a Device.
               </div>
               
-              {whatsappStatus === 'loading' ? (
-                <div style={{ padding: '40px 0', color: 'var(--ink-soft)' }}>
-                  <div className="spinner" style={{ border: '3px solid #f3f3f3', borderTop: '3px solid #25D366', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite', margin: '0 auto 10px' }}></div>
-                  Logging in...
-                </div>
-              ) : whatsappQr ? (
+              {whatsappQr ? (
                 <div style={{
                   background: '#fff',
                   padding: '12px',
@@ -807,9 +846,17 @@ export default function BulkMessageCenter({ clientsList = [], roster = [], API_B
                 }}>
                   <img src={whatsappQr} alt="Scan QR Code" style={{ width: '180px', height: '180px', display: 'block' }} />
                 </div>
+              ) : whatsappStatus === 'loading' ? (
+                <div style={{ padding: '30px 0', color: 'var(--ink-soft)' }}>
+                  <div className="spinner" style={{ border: '3px solid #f3f3f3', borderTop: '3px solid #25D366', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite', margin: '0 auto 10px' }}></div>
+                  Initializing WhatsApp engine...
+                </div>
               ) : (
-                <div style={{ padding: '40px 0', color: 'var(--ink-faint)', fontSize: '13px' }}>
-                  Generating QR code, please wait...
+                <div style={{ padding: '30px 0', color: 'var(--ink-faint)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                  <span>Generating QR code, please wait...</span>
+                  <button type="button" className="btn btn-ghost" style={{ color: '#eb5e28', fontSize: '12px' }} onClick={handleResetWhatsapp}>
+                    🔄 Click to Force Generate QR
+                  </button>
                 </div>
               )}
               

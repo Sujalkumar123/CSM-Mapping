@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { IconClients, IconPerson, IconSend, IconPlus, IconDownload, IconEdit, IconSlack } from './Icons';
+import { IconClients, IconPerson, IconSend, IconPlus, IconDownload, IconEdit, IconSlack, IconMail, IconWhatsApp } from './Icons';
 
 export default function Sidebar({
   view, onViewChange,
@@ -8,7 +8,8 @@ export default function Sidebar({
   sort, onSortChange,
   onAddCsm, onExportCsv,
   onEditClient, onRemoveClient,
-  onSlackSync,
+  onSlackSync, onEmailConfig, onWhatsAppConnect,
+  whatsappStatus = 'disconnected',
   csmNames = [],
   products = [],
   clients = []
@@ -95,6 +96,14 @@ export default function Sidebar({
           <IconClients />
           Clients
           <span className="nav-count">{clients.length}</span>
+        </div>
+        <div
+          className={`nav-item ${view === 'inbox' ? 'active' : ''}`}
+          data-view="inbox"
+          onClick={() => onViewChange('inbox')}
+        >
+          <IconPerson />
+          Inbox
         </div>
         <div
           className={`nav-item ${view === 'bulk' ? 'active' : ''}`}
@@ -202,6 +211,17 @@ export default function Sidebar({
         </button>
         <button className="btn btn-ghost" onClick={onSlackSync} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--violet-ink)', borderColor: 'rgba(139,92,246,0.35)' }}>
           <IconSlack size={14} stroke="var(--violet-ink)" strokeWidth="2.2" /> Sync Slack IDs
+        </button>
+        <button className="btn btn-ghost" onClick={onEmailConfig} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--cobalt-ink)', borderColor: 'rgba(0,120,212,0.35)' }}>
+          <IconMail size={14} stroke="var(--cobalt-ink)" strokeWidth="2.2" /> Connect Gmail
+        </button>
+        <button className="btn btn-ghost" onClick={onWhatsAppConnect} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#1f9e56', borderColor: 'rgba(37,211,102,0.35)' }}>
+          <IconWhatsApp size={14} stroke="#1f9e56" strokeWidth="2.2" />
+          <span style={{
+            width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0,
+            background: whatsappStatus === 'ready' ? '#25D366' : whatsappStatus === 'qr' || whatsappStatus === 'loading' ? '#FFC107' : '#DC3545'
+          }} />
+          {whatsappStatus === 'ready' ? 'WhatsApp connected' : 'Connect WhatsApp'}
         </button>
         <button className="btn btn-ghost" onClick={onExportCsv}>
           <IconDownload /> Export CSV
