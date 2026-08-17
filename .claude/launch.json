@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "csm-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "cwd": "NewLayout/backend",
+      "port": 5001
+    }
+  ]
+}

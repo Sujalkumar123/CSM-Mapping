@@ -26,3 +26,6 @@ Thumbs.db
 # WhatsApp session authentication
 **/.wwebjs_auth/
 **/NewLayout/backend/.wwebjs_auth/
+
+.vercel
+.env*
