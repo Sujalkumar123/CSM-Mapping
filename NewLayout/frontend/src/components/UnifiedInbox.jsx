@@ -20,6 +20,73 @@ function formatTime(ts) {
       d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatListDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+// Gmail-style row list — sender, subject, snippet, date — instead of chat
+// bubbles, since a real inbox is what a mailbox is supposed to look like
+const EmailList = memo(function EmailList({ messages, loading, emptyText, accent }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const newestFirst = useMemo(() => [...messages].reverse(), [messages]);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', background: '#fff', minHeight: 0 }}>
+      {loading ? (
+        <div style={{ padding: '30px 12px', textAlign: 'center', fontSize: '12.5px', color: 'var(--ink-faint, #8a8a99)' }}>Loading…</div>
+      ) : newestFirst.length === 0 ? (
+        <div style={{ padding: '30px 12px', textAlign: 'center', fontSize: '12.5px', color: 'var(--ink-faint, #8a8a99)' }}>{emptyText}</div>
+      ) : (
+        newestFirst.map((m, i) => {
+          const expanded = expandedId === (m.id || i);
+          return (
+            <div key={m.id || i} style={{ borderBottom: '1px solid var(--line-faint, #ececef)' }}>
+              <div
+                onClick={() => setExpandedId(expanded ? null : (m.id || i))}
+                style={{
+                  padding: '10px 12px', cursor: 'pointer',
+                  background: expanded ? 'var(--surface-2, #f7f7f9)' : m.pending ? 'var(--surface-2, #f7f7f9)' : '#fff',
+                  opacity: m.pending ? 0.65 : 1
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.fromMe ? 'You' : (m.fromName || m.from || 'Unknown')}
+                  </span>
+                  <span style={{ fontSize: '10.5px', color: 'var(--ink-faint, #8a8a99)', flexShrink: 0 }}>
+                    {formatListDate(m.timestamp)}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#111', fontWeight: 600, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {m.subject || '(no subject)'}
+                </div>
+                {!expanded && (
+                  <div style={{ fontSize: '11.5px', color: 'var(--ink-faint, #8a8a99)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.snippet || m.body || '(empty)'}
+                  </div>
+                )}
+              </div>
+              {expanded && (
+                <div style={{
+                  padding: '4px 12px 14px', fontSize: '12.5px', lineHeight: 1.55, color: '#333',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--surface-2, #f7f7f9)'
+                }}>
+                  {m.body || <em style={{ opacity: 0.6 }}>(empty)</em>}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+});
+
 const MessageList = memo(function MessageList({ messages, loading, emptyText, accent }) {
   const bottomRef = useRef(null);
 
@@ -100,7 +167,11 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
       const res = await fetch(`${API_BASE}/api/email/thread/${encodeURIComponent(target)}?limit=200`);
       const data = await res.json();
       if (data.success) {
-        onReplace('email', () => data.messages.map(m => ({ ...m, timestamp: Math.floor(m.date / 1000) })));
+        onReplace(
+          'email',
+          () => data.messages.map(m => ({ ...m, timestamp: Math.floor(m.date / 1000) })),
+          { matched: data.matched }
+        );
         setFullyLoaded(true);
       }
     } catch (e) {
@@ -254,12 +325,30 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
         </div>
       ) : (
         <>
-          <MessageList
-            messages={messages}
-            loading={loading}
-            emptyText={`No ${label} messages yet.`}
-            accent={accent}
-          />
+          {channel === 'email' && thread?.matched === false && messages.length > 0 && (
+            <div style={{
+              fontSize: '11px', color: 'var(--ink-soft, #666)', background: 'var(--surface-2, #f7f7f9)',
+              padding: '6px 12px', flexShrink: 0, borderBottom: '1px solid var(--line-faint, #ececef)'
+            }}>
+              No emails with {person.name} yet — showing your recent inbox instead.
+            </div>
+          )}
+
+          {channel === 'email' ? (
+            <EmailList
+              messages={messages}
+              loading={loading}
+              emptyText="No emails yet — your inbox is empty."
+              accent={accent}
+            />
+          ) : (
+            <MessageList
+              messages={messages}
+              loading={loading}
+              emptyText={`No ${label} messages yet.`}
+              accent={accent}
+            />
+          )}
 
           {(loadError || sendError) && (
             <div style={{
@@ -444,10 +533,10 @@ export default function UnifiedInbox({ clientsList, API_BASE, onConnectWhatsApp 
     return () => clearInterval(timer);
   }, [selected, API_BASE]);
 
-  const replaceThread = useCallback((channel, updater) => {
+  const replaceThread = useCallback((channel, updater, meta) => {
     setThreads(prev => prev && ({
       ...prev,
-      [channel]: { ...prev[channel], messages: updater(prev[channel]?.messages || []) }
+      [channel]: { ...prev[channel], messages: updater(prev[channel]?.messages || []), ...meta }
     }));
   }, []);
 

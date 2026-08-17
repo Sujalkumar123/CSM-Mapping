@@ -742,7 +742,12 @@ app.get('/api/inbox', async (req, res) => {
   const settle = async (enabled, unavailable, run) => {
     if (!enabled) return { available: false, reason: unavailable, messages: [] };
     try {
-      return { available: true, messages: await run() };
+      const result = await run();
+      // Some channels (email) return extra metadata alongside the list —
+      // spread it in rather than forcing every settle() caller into one shape
+      return Array.isArray(result)
+        ? { available: true, messages: result }
+        : { available: true, messages: result.messages, ...result.meta };
     } catch (err) {
       return { available: true, error: err.message, messages: [] };
     }
@@ -764,7 +769,8 @@ app.get('/api/inbox', async (req, res) => {
     }),
     settle(!!email, 'No email address on file', async () => {
       if (!getEmailStatus().configured) throw new Error('NOT_CONFIGURED');
-      return fetchEmailThread(email);
+      const { messages, matched } = await fetchEmailThread(email);
+      return { messages, meta: { matched } };
     })
   ]);
 
@@ -837,8 +843,8 @@ app.post('/api/email/config', async (req, res) => {
 app.get('/api/email/thread/:address', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 40, 200);
-    const messages = await fetchEmailThread(req.params.address, limit);
-    res.json({ success: true, messages, limit });
+    const { messages, matched } = await fetchEmailThread(req.params.address, limit);
+    res.json({ success: true, messages, matched, limit });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

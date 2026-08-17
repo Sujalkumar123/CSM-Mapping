@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
+import { convert as htmlToText } from 'html-to-text';
 import { cached, invalidate } from './cache.js';
 
 const IMAP_HOST = 'imap.gmail.com';
@@ -81,33 +82,34 @@ export async function verifyEmailCreds(user, pass) {
   return true;
 }
 
-function htmlToText(html) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
+// Prefer the HTML part over the auto-generated plain-text part. Gmail's own
+// plain-text fallback for templated mail (security alerts, notifications)
+// often prints raw tracking query strings as visible text — the HTML part,
+// properly converted, gives the same body a real client would show.
 async function decodeBody(source) {
-  if (!source) return '';
+  if (!source) return { body: '', snippet: '' };
   try {
     const parsed = await simpleParser(source, { skipImageLinks: true });
-    const text = parsed.text || (parsed.html ? htmlToText(parsed.html) : '');
-    return text
+    const text = parsed.html
+      ? htmlToText(parsed.html, {
+          wordwrap: false,
+          selectors: [
+            { selector: 'a', options: { ignoreHref: true } },
+            { selector: 'img', format: 'skip' }
+          ]
+        })
+      : (parsed.text || '');
+
+    const body = text
       .replace(/[ \t]+/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
       .slice(0, 4000);
+
+    const snippet = body.replace(/\s+/g, ' ').slice(0, 140);
+    return { body, snippet };
   } catch (e) {
-    return '(could not read message body)';
+    return { body: '(could not read message body)', snippet: '' };
   }
 }
 
@@ -129,46 +131,60 @@ export function fetchEmailThread(address, limit = 40) {
   return cached(`email:${address.toLowerCase()}:${limit}`, 60 * 1000, () => loadThread(address, limit));
 }
 
+// Pull and parse a set of message UIDs from an already-open mailbox lock.
+async function loadMessages(client, creds, uids, limit) {
+  let raw = [];
+  for await (const msg of client.fetch(
+    uids.slice(-limit),
+    { uid: true, envelope: true, source: true },
+    { uid: true }
+  )) {
+    raw.push({ uid: msg.uid, envelope: msg.envelope, source: msg.source });
+  }
+
+  const messages = await Promise.all(raw.map(async r => {
+    const from = r.envelope?.from?.[0]?.address || '';
+    const { body, snippet } = await decodeBody(r.source);
+    return {
+      id: String(r.uid),
+      subject: r.envelope?.subject || '(no subject)',
+      from,
+      fromName: r.envelope?.from?.[0]?.name || from,
+      date: r.envelope?.date ? new Date(r.envelope.date).getTime() : Date.now(),
+      fromMe: from.toLowerCase() === creds.user.toLowerCase(),
+      body,
+      snippet,
+      messageId: r.envelope?.messageId || ''
+    };
+  }));
+
+  return messages.sort((a, b) => a.date - b.date);
+}
+
 function loadThread(address, limit) {
   return withImap(async (client, creds) => {
     const mailbox = await resolveMailbox(client);
     const lock = await client.getMailboxLock(mailbox);
 
-    let raw = [];
     try {
       const uids = await client.search({
         or: [{ from: address }, { to: address }]
       }, { uid: true });
 
-      if (!uids || uids.length === 0) return [];
-
-      // Collect first, parse after — async work inside the fetch loop stalls the IMAP stream
-      for await (const msg of client.fetch(
-        uids.slice(-limit),
-        { uid: true, envelope: true, source: true },
-        { uid: true }
-      )) {
-        raw.push({ uid: msg.uid, envelope: msg.envelope, source: msg.source });
+      if (uids && uids.length > 0) {
+        return { messages: await loadMessages(client, creds, uids, limit), matched: true };
       }
+
+      // Nobody has emailed this address yet — fall back to the general
+      // inbox so the panel never sits blank, flagged so the UI can say so
+      const inboxUids = await client.search({ all: true }, { uid: true });
+      const messages = inboxUids && inboxUids.length > 0
+        ? await loadMessages(client, creds, inboxUids, Math.min(limit, 20))
+        : [];
+      return { messages, matched: false };
     } finally {
       lock.release();
     }
-
-    const messages = await Promise.all(raw.map(async r => {
-      const from = r.envelope?.from?.[0]?.address || '';
-      return {
-        id: String(r.uid),
-        subject: r.envelope?.subject || '(no subject)',
-        from,
-        fromName: r.envelope?.from?.[0]?.name || from,
-        date: r.envelope?.date ? new Date(r.envelope.date).getTime() : Date.now(),
-        fromMe: from.toLowerCase() === creds.user.toLowerCase(),
-        body: await decodeBody(r.source),
-        messageId: r.envelope?.messageId || ''
-      };
-    }));
-
-    return messages.sort((a, b) => a.date - b.date);
   });
 }
 
