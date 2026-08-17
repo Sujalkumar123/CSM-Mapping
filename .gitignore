@@ -31,3 +31,6 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Single-instance guard PID file
+**/NewLayout/backend/.server.lock

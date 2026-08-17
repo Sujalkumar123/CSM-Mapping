@@ -13,6 +13,50 @@ import { cached, invalidate } from './cache.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ─── Single-instance guard ───
+// A second server.js (e.g. a leftover `npm run dev`/nodemon in another
+// terminal) binding the same WhatsApp session and .env file is not a
+// harmless coincidence — two Puppeteer/Chrome instances fight over one
+// WhatsApp linked-device slot (forcing a logout) and two processes writing
+// .env can race and silently drop a just-saved credential. Refuse to start
+// a second instance instead of limping along until something breaks.
+const lockPath = path.join(__dirname, '.server.lock');
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM'; // exists but owned by another user — treat as alive
+  }
+}
+
+if (fs.existsSync(lockPath)) {
+  const stalePid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
+  if (stalePid && stalePid !== process.pid && isProcessAlive(stalePid)) {
+    console.error('\n============================================================');
+    console.error(`  ANOTHER BACKEND IS ALREADY RUNNING (PID ${stalePid}).`);
+    console.error('  Running two copies causes WhatsApp session conflicts and');
+    console.error('  can silently lose Slack/Gmail credentials.');
+    console.error('  Stop that process first, then restart this one.');
+    console.error('============================================================\n');
+    process.exit(1);
+  }
+}
+
+fs.writeFileSync(lockPath, String(process.pid), 'utf8');
+
+const releaseLock = () => {
+  try {
+    if (fs.existsSync(lockPath) && fs.readFileSync(lockPath, 'utf8').trim() === String(process.pid)) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch (e) {}
+};
+process.on('exit', releaseLock);
+process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+
 // Prevent third-party background process errors from crashing Node server
 process.on('uncaughtException', (err) => {
   console.error('[Background Warning Suppressed]:', err.message || err);
