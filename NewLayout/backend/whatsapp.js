@@ -12,6 +12,10 @@ const __dirname = path.dirname(__filename);
 let client = null;
 let qrCodeData = '';
 let clientStatus = 'disconnected'; // 'disconnected', 'qr', 'loading', 'ready'
+// Surfaced through /api/whatsapp/status — without this, a launch failure on
+// a host we have no shell/log access to (Render) is completely invisible;
+// the process just sits at 'disconnected' forever with no way to diagnose it
+let lastInitError = '';
 
 // In-memory message store: { [cleanPhone]: [{id, body, fromMe, timestamp}] }
 const messageStore = {};
@@ -325,6 +329,7 @@ export function initWhatsApp() {
   client.on('ready', () => {
     clientStatus = 'ready';
     qrCodeData = '';
+    lastInitError = '';
     console.log('✅ WhatsApp client is ready and connected!');
   });
 
@@ -374,16 +379,27 @@ export function initWhatsApp() {
   });
 
   client.initialize().catch(err => {
-    console.error("Failed to initialize WhatsApp client:", err.message || err);
+    lastInitError = err.message || String(err);
+    console.error("Failed to initialize WhatsApp client:", lastInitError);
     clientStatus = 'disconnected';
     qrCodeData = '';
+
+    // A launch failure otherwise sticks at 'disconnected' forever with no
+    // way to recover short of a manual reset. Most causes on a fresh host
+    // (transient resource pressure on cold start) clear up on their own —
+    // retry with backoff instead of requiring someone to notice and click reset.
+    console.log('[WhatsApp] Retrying initialization in 20s...');
+    setTimeout(() => {
+      if (clientStatus === 'disconnected') initWhatsApp();
+    }, 20000);
   });
 }
 
 export function getWhatsAppStatus() {
   return {
     status: clientStatus,
-    qr: qrCodeData
+    qr: qrCodeData,
+    lastError: clientStatus === 'disconnected' ? lastInitError : ''
   };
 }
 
