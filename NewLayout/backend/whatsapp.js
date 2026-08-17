@@ -3,6 +3,7 @@ const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
+import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -144,6 +145,54 @@ function getChromePath() {
 
 let isRestarting = false;
 
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+// taskkill /T kills the whole process tree (GPU/renderer/crashpad helpers
+// included) — killing just the main PID on Windows can leave those orphaned,
+// which is exactly what left a dead Chrome holding the profile lock forever.
+function forceKillProcessTree(pid) {
+  return new Promise((resolve) => {
+    if (!pid) return resolve();
+    if (process.platform === 'win32') {
+      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => resolve());
+    } else {
+      try { process.kill(pid, 'SIGKILL'); } catch (e) {}
+      resolve();
+    }
+  });
+}
+
+// client.destroy() resolving is not proof the OS process actually exited —
+// in practice it sometimes leaves an orphaned headless Chrome that holds the
+// session profile locked, so every subsequent reset/reconnect hangs forever
+// waiting on a lock nothing will ever release. Verify, and force-kill if not.
+async function ensureBrowserClosed(oldClient) {
+  const browserProcess = oldClient?.pupBrowser?.process?.();
+  const pid = browserProcess?.pid;
+
+  try {
+    await Promise.race([
+      oldClient.destroy(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('destroy timeout')), 4000))
+    ]);
+  } catch (e) {
+    // destroy() hung, or the page was already dead underneath it — either
+    // way, fall through to the PID check below rather than trusting it
+  }
+
+  if (pid && isPidAlive(pid)) {
+    console.log(`[WhatsApp Auto-Recovery] Browser process ${pid} still alive after destroy() — force-killing.`);
+    await forceKillProcessTree(pid);
+  }
+}
+
 // Only a genuine unlink invalidates the stored session. A dropped network,
 // a sleeping laptop or a phone that went offline all raise 'disconnected'
 // too — wiping auth data for those means re-scanning a QR code over a blip,
@@ -154,7 +203,7 @@ function isUnrecoverable(reason) {
   return UNRECOVERABLE.some(r => String(reason || '').toUpperCase().includes(r));
 }
 
-function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
+async function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
   if (isRestarting) return;
   isRestarting = true;
   console.log('\n============================================================');
@@ -167,13 +216,14 @@ function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
   clientStatus = 'loading';
   qrCodeData = '';
 
-  // Safely cleanup old client instance non-blockingly
+  // Wait for (and if needed, force) the old browser process to actually die
+  // before touching its profile directory or launching a new one — skipping
+  // this is exactly what left an orphaned Chrome holding the session lock
+  // forever, hanging every subsequent connect attempt.
   if (client) {
     const oldClient = client;
     client = null;
-    try {
-      oldClient.destroy().catch(() => {});
-    } catch (e) {}
+    await ensureBrowserClosed(oldClient);
   }
 
   const restart = () => {
@@ -185,20 +235,23 @@ function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
 
   if (!wipeSession) {
     // Reconnect against the existing LocalAuth data — no re-scan needed
-    setTimeout(restart, 1500);
+    setTimeout(restart, 500);
     return;
   }
 
-  // Delay 1.5 seconds so LocalAuth.logout() in whatsapp-web.js finishes its internal unlinking first
+  // Small delay so LocalAuth's own internal unlinking (if any) settles
+  // before we sweep the directory ourselves
   setTimeout(() => {
     const authDir = path.join(__dirname, '.wwebjs_auth');
     fs.rm(authDir, { recursive: true, force: true }, (err) => {
       if (!err) {
         console.log('[WhatsApp Auto-Recovery] Cleared stale session data directory.');
+      } else {
+        console.error('[WhatsApp Auto-Recovery] Could not fully clear session directory:', err.message);
       }
       restart();
     });
-  }, 1500);
+  }, 500);
 }
 
 export function initWhatsApp() {
