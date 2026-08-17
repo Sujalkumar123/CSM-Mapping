@@ -264,7 +264,7 @@ const MessageList = memo(function MessageList({ messages, loading, emptyText, ac
   );
 });
 
-function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, API_BASE, onConnectWhatsApp, onOpenEmail }) {
+function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, API_BASE, onConnectWhatsApp, onOpenEmail, onExpand }) {
   const { label, accent, Icon } = CHANNELS[channel];
   const [input, setInput] = useState('');
   const [subject, setSubject] = useState('');
@@ -420,6 +420,21 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
             {loadingMore ? 'Loading…' : 'Load full inbox'}
           </button>
         )}
+        {onExpand && (
+          <button
+            type="button"
+            title={`Expand ${label}`}
+            onClick={onExpand}
+            style={{
+              flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--ink-faint, #8a8a99)'
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = accent}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--ink-faint, #8a8a99)'}
+          >
+            <ExpandIcon size={13} />
+          </button>
+        )}
       </div>
 
       {unavailable ? (
@@ -538,6 +553,58 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Blows one channel up to full width. Hosts a real ChannelPanel rather than
+// a read-only copy, so replying works exactly the same from in here.
+function ChannelExpandModal({ channel, onClose, escapeEnabled = true, ...panelProps }) {
+  useEffect(() => {
+    // When the per-email reader is stacked on top, Escape belongs to it —
+    // otherwise one keypress would dismiss both layers at once
+    if (!channel || !escapeEnabled) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [channel, escapeEnabled, onClose]);
+
+  if (!channel) return null;
+
+  const { label } = CHANNELS[channel];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+        backdropFilter: 'blur(3px)', zIndex: 1150,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 'min(900px, 100%)', height: 'min(80vh, 720px)',
+          display: 'flex', flexDirection: 'column', gap: '8px'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.9)', border: 'none', borderRadius: '6px',
+              padding: '4px 10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#333'
+            }}
+          >
+            Close {label} ✕
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <ChannelPanel channel={channel} {...panelProps} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -743,6 +810,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
   const setSelectedKey = onSelectPerson;
   const [threads, setThreads] = useState(null);
   const [readerMail, setReaderMail] = useState(null);
+  const [expandedChannel, setExpandedChannel] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // Derived once per data change instead of once per render
@@ -917,10 +985,27 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
                 API_BASE={API_BASE}
                 onConnectWhatsApp={onConnectWhatsApp}
                 onOpenEmail={setReaderMail}
+                onExpand={() => setExpandedChannel(ch)}
               />
             ))}
           </div>
         </div>
+      )}
+
+      {selected && (
+        <ChannelExpandModal
+          channel={expandedChannel}
+          onClose={() => setExpandedChannel(null)}
+          escapeEnabled={!readerMail}
+          person={selected}
+          thread={threads?.[expandedChannel]}
+          loading={loading}
+          onAppend={appendThread}
+          onReplace={replaceThread}
+          API_BASE={API_BASE}
+          onConnectWhatsApp={onConnectWhatsApp}
+          onOpenEmail={setReaderMail}
+        />
       )}
 
       <EmailReaderModal message={readerMail} onClose={() => setReaderMail(null)} />
