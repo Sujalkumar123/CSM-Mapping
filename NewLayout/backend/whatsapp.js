@@ -147,6 +147,33 @@ function getChromePath() {
   return null;
 }
 
+// On Render, the build-time `npx puppeteer browsers install chrome` step can
+// resolve to a *different* puppeteer copy than the one this file actually
+// imports (npm hoisting / --prefix quirks), so the Chrome build it downloads
+// doesn't match what puppeteer.executablePath() expects at runtime — the
+// binary is simply never where this process looks for it. Rather than keep
+// guessing at the build config from outside, install it ourselves, in-process,
+// using the exact puppeteer module already imported here — that guarantees
+// the version matches by construction, no build step involved at all.
+async function ensureChromeInstalled() {
+  if (getChromePath()) return true;
+
+  console.log('[WhatsApp] No Chrome binary found — installing one now (first boot only, may take ~30-60s)...');
+  try {
+    await new Promise((resolve, reject) => {
+      execFile('npx', ['puppeteer', 'browsers', 'install', 'chrome'], { cwd: __dirname, timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+    console.log('[WhatsApp] Chrome install finished.');
+  } catch (err) {
+    console.error('[WhatsApp] Self-install of Chrome failed:', err.message);
+  }
+
+  return !!getChromePath();
+}
+
 let isRestarting = false;
 
 function isPidAlive(pid) {
@@ -258,9 +285,11 @@ async function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
   }, 500);
 }
 
-export function initWhatsApp() {
+export async function initWhatsApp() {
   console.log("Initializing WhatsApp background client...");
-  
+
+  await ensureChromeInstalled();
+
   // Load local persistent cache
   loadHistoryFromDisk();
   
