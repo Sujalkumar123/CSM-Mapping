@@ -73,6 +73,15 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
                 Open WhatsApp on your phone → Settings → Linked Devices → Link a Device, then scan this code.
               </p>
 
+              <div style={{
+                background: 'rgba(235, 94, 40, 0.08)', color: '#EB5E28',
+                padding: '9px 12px', borderRadius: 'var(--radius-md)',
+                fontSize: '11px', fontWeight: 500, lineHeight: 1.4,
+                border: '1px solid rgba(235, 94, 40, 0.2)'
+              }}>
+                ⚠️ <b>Do NOT scan with your phone's regular camera app.</b> It must be scanned from inside WhatsApp itself — Settings → Linked Devices → Link a Device — or the scan won't reach this dashboard at all.
+              </div>
+
               {qr ? (
                 <div style={{ background: '#fff', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--line-strong)' }}>
                   <img src={qr} alt="Scan to link WhatsApp" style={{ width: '180px', height: '180px', display: 'block' }} />
