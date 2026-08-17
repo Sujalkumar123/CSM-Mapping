@@ -6,7 +6,10 @@ import { IconWhatsApp, IconClose } from './Icons';
 export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
   const [status, setStatus] = useState('disconnected');
   const [qr, setQr] = useState('');
+  const [lastError, setLastError] = useState('');
+  const [waitSeconds, setWaitSeconds] = useState(0);
   const pollRef = useRef(null);
+  const waitTimerRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -20,6 +23,7 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
         .then(data => {
           setStatus(data.status);
           setQr(data.qr || '');
+          setLastError(data.lastError || '');
         })
         .catch(() => {});
     };
@@ -28,6 +32,20 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
     pollRef.current = setInterval(check, 1200);
     return () => clearInterval(pollRef.current);
   }, [isOpen, API_BASE]);
+
+  // Cold-starting a headless browser (Render's compute tier especially) can
+  // take a couple of minutes. Without this, the spinner alone reads as
+  // "broken," which pushes people to hit Reset repeatedly — and each click
+  // restarts that same slow clock from zero instead of just letting it finish.
+  useEffect(() => {
+    if (!isOpen || qr || status === 'ready') {
+      clearInterval(waitTimerRef.current);
+      setWaitSeconds(0);
+      return;
+    }
+    waitTimerRef.current = setInterval(() => setWaitSeconds(s => s + 1), 1000);
+    return () => clearInterval(waitTimerRef.current);
+  }, [isOpen, qr, status]);
 
   // Auto-close a couple seconds after the scan succeeds, so the success state is visible
   useEffect(() => {
@@ -38,6 +56,15 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
   }, [status, isOpen, onClose]);
 
   const handleReset = async () => {
+    // Mid-cold-start with no error yet, this is very likely someone about to
+    // restart a slow-but-working process out of impatience — that's the
+    // exact behavior that turns a single ~2min wait into a repeating loop
+    if (!qr && status === 'loading' && !lastError && waitSeconds < 90) {
+      const proceed = window.confirm(
+        `It's still starting up (${waitSeconds}s) with no error — this is likely just a slow cold start, not stuck.\n\nResetting now will throw away this progress and restart the ~2 minute process from zero. Reset anyway?`
+      );
+      if (!proceed) return;
+    }
     setStatus('disconnected');
     setQr('');
     try {
@@ -93,6 +120,23 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
                     width: '30px', height: '30px', animation: 'spin 1s linear infinite', margin: '0 auto 10px'
                   }} />
                   {status === 'loading' ? 'Initializing WhatsApp engine…' : 'Waiting for a QR code…'}
+                  {waitSeconds >= 20 && (
+                    <div style={{
+                      marginTop: '12px', fontSize: '11.5px', color: 'var(--ink-faint)',
+                      lineHeight: 1.5, maxWidth: '260px', marginInline: 'auto'
+                    }}>
+                      Still starting up ({waitSeconds}s) — a first-time connect can take a couple of minutes on the server.
+                      <br /><b>Clicking Reset now restarts this from zero</b> — it's usually faster to just wait.
+                    </div>
+                  )}
+                  {lastError && (
+                    <div style={{
+                      marginTop: '10px', fontSize: '11px', color: '#EB5E28', background: 'rgba(235, 94, 40, 0.08)',
+                      padding: '8px 10px', borderRadius: '6px', textAlign: 'left', wordBreak: 'break-word'
+                    }}>
+                      {lastError}
+                    </div>
+                  )}
                 </div>
               )}
 
