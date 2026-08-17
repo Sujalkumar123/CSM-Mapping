@@ -9,7 +9,6 @@ import AddCsmModal from './components/AddCsmModal';
 import SlackSyncModal from './components/SlackSyncModal';
 import EmailConfigModal from './components/EmailConfigModal';
 import WhatsAppConnectModal from './components/WhatsAppConnectModal';
-import WhatsAppApp from './components/WhatsAppApp';
 import UnifiedInbox from './components/UnifiedInbox';
 
 const API_BASE = import.meta.env.VITE_API_URL || 
@@ -17,7 +16,7 @@ const API_BASE = import.meta.env.VITE_API_URL ||
     ? 'http://localhost:5001'
     : 'https://csm-mapping-3.onrender.com');
 
-const VIEWS = ['clients', 'csm', 'inbox', 'whatsapp', 'bulk'];
+const VIEWS = ['clients', 'csm', 'inbox', 'bulk'];
 const KPIS = ['clients', 'csm', 'phone', 'email'];
 const SORTS = ['csm-az', 'csm-za', 'co-az', 'co-za', 'id-asc', 'id-desc'];
 
@@ -292,11 +291,10 @@ export default function App() {
     clients: ['Client & CSM directory', 'Find who owns an account and reach them in one tap.'],
     csm: ['CSM roster', 'Every CSM in one place, with their live account load.'],
     bulk: ['Bulk message center', 'Message a whole segment of CSMs at once — one draft, every channel.'],
-    inbox: ['Inbox', 'WhatsApp, Slack and email with one person — side by side, no app switching.'],
-    whatsapp: ['WhatsApp', 'A dedicated WhatsApp app for your CSM list — nothing else.']
+    inbox: ['Inbox', 'WhatsApp, Slack and email with one person — side by side, no app switching.']
   };
 
-  const showDirectoryChrome = view !== 'bulk' && view !== 'inbox' && view !== 'whatsapp';
+  const showDirectoryChrome = view !== 'bulk' && view !== 'inbox';
 
   const activeKpiNotes = {
     clients: '',
@@ -407,17 +405,6 @@ export default function App() {
           <UnifiedInbox
             clientsList={clientsList}
             API_BASE={API_BASE}
-            selectedKey={personKey}
-            onSelectPerson={setPersonKey}
-            onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
-          />
-        )}
-
-        {view === 'whatsapp' && (
-          <WhatsAppApp
-            clientsList={clientsList}
-            API_BASE={API_BASE}
-            whatsappStatus={whatsappStatus}
             selectedKey={personKey}
             onSelectPerson={setPersonKey}
             onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
