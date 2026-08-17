@@ -23,9 +23,11 @@ build/
 .DS_Store
 Thumbs.db
 
-# WhatsApp session authentication
+# WhatsApp session authentication, cache, and local chat history
 **/.wwebjs_auth/
 **/NewLayout/backend/.wwebjs_auth/
+**/.wwebjs_cache/
+**/NewLayout/backend/chat_history.json
 
 .vercel
 .env*

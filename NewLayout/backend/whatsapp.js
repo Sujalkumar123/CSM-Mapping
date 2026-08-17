@@ -44,17 +44,26 @@ function getCleanPhoneFromJid(jid) {
   return partBeforeColon.replace(/\D/g, '');
 }
 
-// Load history from local JSON file (retaining only last 24 hours of messages)
+// Load history from local JSON file (retaining only last 24 hours of messages,
+// and only for numbers still on the CSM roster — older captures made before
+// roster-scoping existed can otherwise leak group chats / notification IDs
+// back into memory on every restart)
 function loadHistoryFromDisk() {
   try {
     if (fs.existsSync(chatHistoryPath)) {
       const data = JSON.parse(fs.readFileSync(chatHistoryPath, 'utf8'));
       const now = Math.floor(Date.now() / 1000);
       const limit = now - 24 * 60 * 60; // 24 hours in seconds
-      
+      let dropped = 0;
+
       Object.keys(data).forEach(phone => {
+        if (!isRosterPhone(phone)) { dropped++; return; }
         messageStore[phone] = (data[phone] || []).filter(msg => msg.timestamp >= limit);
       });
+      if (dropped > 0) {
+        console.log(`Dropped ${dropped} cached thread(s) no longer on the CSM roster.`);
+        saveHistoryToDisk();
+      }
       console.log('Loaded 24-hour chat history cache from disk.');
     }
   } catch (e) {
