@@ -21,7 +21,7 @@ function formatDateLabel(timestamp) {
   return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect }) {
+export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect, fill = false }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -157,10 +157,10 @@ export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect }) 
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
-      height: '400px',
+      height: fill ? '100%' : '400px',
       background: '#fff',
       boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-      marginBottom: '16px'
+      marginBottom: fill ? 0 : '16px'
     }}>
       {/* Header */}
       <div style={{

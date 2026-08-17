@@ -9,6 +9,7 @@ import AddCsmModal from './components/AddCsmModal';
 import SlackSyncModal from './components/SlackSyncModal';
 import EmailConfigModal from './components/EmailConfigModal';
 import WhatsAppConnectModal from './components/WhatsAppConnectModal';
+import WhatsAppApp from './components/WhatsAppApp';
 import UnifiedInbox from './components/UnifiedInbox';
 
 const API_BASE = import.meta.env.VITE_API_URL || 
@@ -247,10 +248,11 @@ export default function App() {
     clients: ['Client & CSM directory', 'Find who owns an account and reach them in one tap.'],
     csm: ['CSM roster', 'Every CSM in one place, with their live account load.'],
     bulk: ['Bulk message center', 'Message a whole segment of CSMs at once — one draft, every channel.'],
-    inbox: ['Inbox', 'WhatsApp, Slack and email with one person — side by side, no app switching.']
+    inbox: ['Inbox', 'WhatsApp, Slack and email with one person — side by side, no app switching.'],
+    whatsapp: ['WhatsApp', 'A dedicated WhatsApp app for your CSM list — nothing else.']
   };
 
-  const showDirectoryChrome = view !== 'bulk' && view !== 'inbox';
+  const showDirectoryChrome = view !== 'bulk' && view !== 'inbox' && view !== 'whatsapp';
 
   const activeKpiNotes = {
     clients: '',
@@ -361,6 +363,15 @@ export default function App() {
           <UnifiedInbox
             clientsList={clientsList}
             API_BASE={API_BASE}
+            onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
+          />
+        )}
+
+        {view === 'whatsapp' && (
+          <WhatsAppApp
+            clientsList={clientsList}
+            API_BASE={API_BASE}
+            whatsappStatus={whatsappStatus}
             onConnectWhatsApp={() => setIsWhatsAppModalOpen(true)}
           />
         )}

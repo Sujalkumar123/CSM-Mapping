@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
-import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages, setRosterPhones } from './whatsapp.js';
+import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages, setRosterPhones, getRosterSummaries } from './whatsapp.js';
 import { getEmailStatus, verifyEmailCreds, fetchEmailThread, sendEmail, resetEmailConnection, resetEmailTransport } from './email.js';
 import { cached, invalidate } from './cache.js';
 
@@ -928,6 +928,15 @@ app.get('/api/whatsapp/messages/:phone', (req, res) => {
   try {
     const messages = getStoredMessages(req.params.phone);
     res.json({ success: true, messages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10b-bis. Latest message per roster contact, for the chat-list screen
+app.get('/api/whatsapp/summary', (req, res) => {
+  try {
+    res.json({ success: true, summaries: getRosterSummaries() });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

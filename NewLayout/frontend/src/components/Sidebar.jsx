@@ -106,6 +106,14 @@ export default function Sidebar({
           Inbox
         </div>
         <div
+          className={`nav-item ${view === 'whatsapp' ? 'active' : ''}`}
+          data-view="whatsapp"
+          onClick={() => onViewChange('whatsapp')}
+        >
+          <IconWhatsApp size={14} />
+          WhatsApp
+        </div>
+        <div
           className={`nav-item ${view === 'bulk' ? 'active' : ''}`}
           data-view="bulk"
           onClick={() => onViewChange('bulk')}

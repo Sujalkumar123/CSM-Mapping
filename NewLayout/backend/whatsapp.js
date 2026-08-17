@@ -36,6 +36,19 @@ function isRosterPhone(cleanPhone) {
   return rosterPhones.has(cleanPhone);
 }
 
+// One latest-message-per-contact snapshot, for a WhatsApp-style chat list —
+// a real client-side inbox screen, not the single-thread view. Cheap: reads
+// the in-memory store already scoped to the roster, no WhatsApp API calls.
+export function getRosterSummaries() {
+  const summaries = {};
+  for (const phone of rosterPhones) {
+    const thread = messageStore[phone];
+    if (!thread || thread.length === 0) continue;
+    summaries[phone] = thread[thread.length - 1];
+  }
+  return summaries;
+}
+
 // Safely clean JID to phone number, handling multi-device suffixes (e.g. '919999999999:1@c.us' -> '919999999999')
 function getCleanPhoneFromJid(jid) {
   if (!jid) return '';
