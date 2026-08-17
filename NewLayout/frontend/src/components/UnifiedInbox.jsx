@@ -31,7 +31,96 @@ function formatListDate(ts) {
 
 // Gmail-style row list — sender, subject, snippet, date — instead of chat
 // bubbles, since a real inbox is what a mailbox is supposed to look like
-const EmailList = memo(function EmailList({ messages, loading, emptyText, accent }) {
+// Full-width reader — the three-column panel is far too narrow for a real
+// email, so anything longer than a couple lines gets its own roomy view.
+function EmailReaderModal({ message, onClose }) {
+  useEffect(() => {
+    if (!message) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [message, onClose]);
+
+  if (!message) return null;
+
+  const when = message.timestamp
+    ? new Date(message.timestamp * 1000).toLocaleString([], {
+        day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      })
+    : '';
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+        backdropFilter: 'blur(3px)', zIndex: 1200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: '14px', width: 'min(900px, 100%)',
+          maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+          overflow: 'hidden', boxShadow: '0 18px 50px rgba(0,0,0,0.25)'
+        }}
+      >
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid var(--line-faint, #ececef)', flexShrink: 0
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '17px', fontWeight: 700, color: '#111', lineHeight: 1.35 }}>
+                {message.subject || '(no subject)'}
+              </div>
+              <div style={{ fontSize: '12.5px', color: 'var(--ink-faint, #8a8a99)', marginTop: '6px', wordBreak: 'break-word' }}>
+                <strong style={{ color: 'var(--ink-soft, #555)' }}>
+                  {message.fromMe ? 'You' : (message.fromName || message.from || 'Unknown')}
+                </strong>
+                {message.from && !message.fromMe && <> &lt;{message.from}&gt;</>}
+                {message.to?.length > 0 && <> → {message.to.join(', ')}</>}
+              </div>
+              {when && (
+                <div style={{ fontSize: '11.5px', color: 'var(--ink-faint, #8a8a99)', marginTop: '3px' }}>{when}</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: '22px',
+                lineHeight: 1, color: 'var(--ink-faint, #8a8a99)', padding: '0 4px', flexShrink: 0
+              }}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div style={{
+          padding: '18px 20px', overflowY: 'auto', flex: 1, minHeight: 0,
+          fontSize: '14px', lineHeight: 1.65, color: '#222',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+        }}>
+          {message.body || <em style={{ opacity: 0.6 }}>(empty)</em>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ExpandIcon = ({ size = 12 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+
+const EmailList = memo(function EmailList({ messages, loading, emptyText, accent, onOpen }) {
   const [expandedId, setExpandedId] = useState(null);
   const newestFirst = useMemo(() => [...messages].reverse(), [messages]);
 
@@ -54,12 +143,29 @@ const EmailList = memo(function EmailList({ messages, loading, emptyText, accent
                   opacity: m.pending ? 0.65 : 1
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                   <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.fromMe ? 'You' : (m.fromName || m.from || 'Unknown')}
                   </span>
-                  <span style={{ fontSize: '10.5px', color: 'var(--ink-faint, #8a8a99)', flexShrink: 0 }}>
-                    {formatListDate(m.timestamp)}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    <span style={{ fontSize: '10.5px', color: 'var(--ink-faint, #8a8a99)' }}>
+                      {formatListDate(m.timestamp)}
+                    </span>
+                    {onOpen && (
+                      <button
+                        type="button"
+                        title="Open in reader"
+                        onClick={e => { e.stopPropagation(); onOpen(m); }}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                          display: 'flex', alignItems: 'center', color: 'var(--ink-faint, #8a8a99)'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = accent}
+                        onMouseLeave={e => e.currentTarget.style.color = 'var(--ink-faint, #8a8a99)'}
+                      >
+                        <ExpandIcon />
+                      </button>
+                    )}
                   </span>
                 </div>
                 <div style={{ fontSize: '12px', color: '#111', fontWeight: 600, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -72,11 +178,28 @@ const EmailList = memo(function EmailList({ messages, loading, emptyText, accent
                 )}
               </div>
               {expanded && (
-                <div style={{
-                  padding: '4px 12px 14px', fontSize: '12.5px', lineHeight: 1.55, color: '#333',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--surface-2, #f7f7f9)'
-                }}>
-                  {m.body || <em style={{ opacity: 0.6 }}>(empty)</em>}
+                <div style={{ background: 'var(--surface-2, #f7f7f9)', padding: '4px 12px 12px' }}>
+                  <div style={{
+                    fontSize: '12.5px', lineHeight: 1.55, color: '#333',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    maxHeight: '220px', overflowY: 'auto'
+                  }}>
+                    {m.body || <em style={{ opacity: 0.6 }}>(empty)</em>}
+                  </div>
+                  {onOpen && (
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); onOpen(m); }}
+                      style={{
+                        marginTop: '8px', display: 'flex', alignItems: 'center', gap: '5px',
+                        background: '#fff', border: '1px solid var(--line-strong, #dcdce4)',
+                        borderRadius: '6px', padding: '4px 9px', fontSize: '11px',
+                        fontWeight: 600, color: accent, cursor: 'pointer'
+                      }}
+                    >
+                      <ExpandIcon /> Open in reader
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -141,7 +264,7 @@ const MessageList = memo(function MessageList({ messages, loading, emptyText, ac
   );
 });
 
-function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, API_BASE, onConnectWhatsApp }) {
+function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, API_BASE, onConnectWhatsApp, onOpenEmail }) {
   const { label, accent, Icon } = CHANNELS[channel];
   const [input, setInput] = useState('');
   const [subject, setSubject] = useState('');
@@ -340,6 +463,7 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
               loading={loading}
               emptyText="No emails yet — your inbox is empty."
               accent={accent}
+              onOpen={onOpenEmail}
             />
           ) : (
             <MessageList
@@ -523,7 +647,7 @@ function FeedPanel({ title, accent, Icon, children, empty, flush = false }) {
 
 // The Inbox landing screen — recent CSM activity across all three channels
 // at once, so you don't have to click into 80 people to see what's new.
-function OverviewFeeds({ people, API_BASE, onSelect }) {
+function OverviewFeeds({ people, API_BASE, onSelect, onOpenEmail }) {
   const [overview, setOverview] = useState(null);
 
   useEffect(() => {
@@ -604,6 +728,7 @@ function OverviewFeeds({ people, API_BASE, onSelect }) {
               loading={false}
               emptyText="No CSM emails found."
               accent="#0078d4"
+              onOpen={onOpenEmail}
             />
           )}
         </FeedPanel>
@@ -617,6 +742,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
   const [deferredQuery, setDeferredQuery] = useState('');
   const setSelectedKey = onSelectPerson;
   const [threads, setThreads] = useState(null);
+  const [readerMail, setReaderMail] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // Derived once per data change instead of once per render
@@ -753,7 +879,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
       </div>
 
       {!selected ? (
-        <OverviewFeeds people={people} API_BASE={API_BASE} onSelect={setSelectedKey} />
+        <OverviewFeeds people={people} API_BASE={API_BASE} onSelect={setSelectedKey} onOpenEmail={setReaderMail} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0, minWidth: 0 }}>
           <div style={{
@@ -790,11 +916,14 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
                 onReplace={replaceThread}
                 API_BASE={API_BASE}
                 onConnectWhatsApp={onConnectWhatsApp}
+                onOpenEmail={setReaderMail}
               />
             ))}
           </div>
         </div>
       )}
+
+      <EmailReaderModal message={readerMail} onClose={() => setReaderMail(null)} />
     </div>
   );
 }
