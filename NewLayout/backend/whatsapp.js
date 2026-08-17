@@ -332,6 +332,26 @@ export async function initWhatsApp() {
       '--no-zygote',
       '--disable-gpu',
       '--disable-blink-features=AutomationControlled',
+      // Chrome dying ~15-30s into launch with "Target closed" is the OOM
+      // signature on Render's 512MB free-tier RAM — these trim the parts of
+      // Chrome's footprint that headless WhatsApp Web never needs anyway.
+      // NOTE: --single-process was tried here and reverted — it broke
+      // navigation ("frame was detached") on both Windows and, per Chrome's
+      // own docs, is increasingly unsupported/unstable in modern Chrome
+      // generally, not just on this platform.
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-breakpad',
+      '--disable-component-update',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-translate',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--js-flags=--max-old-space-size=192',
       '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
   };
