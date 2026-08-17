@@ -449,6 +449,169 @@ const PersonRow = memo(function PersonRow({ person, active, onSelect }) {
   );
 });
 
+function normalizePhone(phone) {
+  let clean = String(phone || '').replace(/\D/g, '');
+  if (clean.length === 10) clean = '91' + clean;
+  return clean;
+}
+
+// A read-only "recent activity" row — click to open the full 3-pane view
+const FeedRow = memo(function FeedRow({ name, preview, previewLabel, timestamp, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '9px',
+        padding: '8px 10px', cursor: 'pointer', borderRadius: '8px'
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2, #f7f7f9)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <div style={{
+        width: '28px', height: '28px', borderRadius: '50%',
+        background: getAvatarColor(name), color: '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '10.5px', fontWeight: 700, flexShrink: 0
+      }}>
+        {getInitials(name)}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {name}
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--ink-faint, #8a8a99)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {previewLabel}
+        </div>
+      </div>
+      {timestamp && (
+        <span style={{ fontSize: '10px', color: 'var(--ink-faint, #8a8a99)', flexShrink: 0 }}>{formatTime(timestamp)}</span>
+      )}
+    </div>
+  );
+});
+
+function FeedPanel({ title, accent, Icon, children, empty, flush = false }) {
+  return (
+    <div style={{
+      border: '1px solid var(--line-strong, #dcdce4)', borderRadius: '12px',
+      background: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px',
+        borderBottom: '1px solid var(--line-faint, #ececef)', flexShrink: 0
+      }}>
+        <span style={{
+          width: '22px', height: '22px', borderRadius: '6px', background: accent, color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+        }}>
+          <Icon size={12} />
+        </span>
+        <span style={{ fontWeight: 700, fontSize: '12.5px', color: '#111' }}>{title}</span>
+      </div>
+      {empty ? (
+        <div style={{ padding: '20px 10px', textAlign: 'center', fontSize: '12px', color: 'var(--ink-faint, #8a8a99)' }}>
+          {empty}
+        </div>
+      ) : flush ? (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{children}</div>
+      ) : (
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '4px' }}>{children}</div>
+      )}
+    </div>
+  );
+}
+
+// The Inbox landing screen — recent CSM activity across all three channels
+// at once, so you don't have to click into 80 people to see what's new.
+function OverviewFeeds({ people, API_BASE, onSelect }) {
+  const [overview, setOverview] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      fetch(`${API_BASE}/api/inbox/overview`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled && d.success) setOverview(d); })
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 8000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [API_BASE]);
+
+  const byPhone = useMemo(() => new Map(people.filter(p => p.phone).map(p => [normalizePhone(p.phone), p])), [people]);
+  const bySlack = useMemo(() => new Map(people.filter(p => p.slack).map(p => [p.slack, p])), [people]);
+
+  const waFeed = useMemo(() => {
+    if (!overview) return [];
+    return Object.entries(overview.whatsapp)
+      .map(([phone, msg]) => ({ person: byPhone.get(phone), msg }))
+      .filter(r => r.person)
+      .sort((a, b) => b.msg.timestamp - a.msg.timestamp);
+  }, [overview, byPhone]);
+
+  const slackFeed = useMemo(() => {
+    if (!overview) return [];
+    return Object.entries(overview.slack)
+      .map(([slackId, msg]) => ({ person: bySlack.get(slackId), msg }))
+      .filter(r => r.person)
+      .sort((a, b) => b.msg.timestamp - a.msg.timestamp);
+  }, [overview, bySlack]);
+
+  const emailFeed = useMemo(() => {
+    if (!overview) return [];
+    return overview.email.map(m => ({ ...m, timestamp: Math.floor(m.date / 1000) }));
+  }, [overview]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0 }}>
+      <div style={{
+        padding: '11px 14px', border: '1px solid var(--line-strong, #dcdce4)', borderRadius: '12px',
+        background: '#fff', fontSize: '13px', color: 'var(--ink-soft, #555)', flexShrink: 0
+      }}>
+        Recent activity across your CSM roster — pick anyone on the left to open the full conversation.
+      </div>
+
+      <div className="inbox-panels">
+        <FeedPanel title="WhatsApp" accent="#25D366" Icon={IconWhatsApp} empty={overview && waFeed.length === 0 ? 'No dashboard WhatsApp chats yet.' : null}>
+          {!overview ? null : waFeed.map(r => (
+            <FeedRow
+              key={r.person.key}
+              name={r.person.name}
+              previewLabel={`${r.msg.fromMe ? 'You: ' : ''}${r.msg.body || '(media)'}`}
+              timestamp={r.msg.timestamp}
+              onClick={() => onSelect(r.person.key)}
+            />
+          ))}
+        </FeedPanel>
+
+        <FeedPanel title="Slack" accent="#7c3aed" Icon={IconSlack} empty={overview && slackFeed.length === 0 ? 'No dashboard Slack chats yet.' : null}>
+          {!overview ? null : slackFeed.map(r => (
+            <FeedRow
+              key={r.person.key}
+              name={r.person.name}
+              previewLabel={`${r.msg.fromMe ? 'You: ' : ''}${r.msg.body || '(empty)'}`}
+              timestamp={r.msg.timestamp}
+              onClick={() => onSelect(r.person.key)}
+            />
+          ))}
+        </FeedPanel>
+
+        <FeedPanel title="Email" accent="#0078d4" Icon={IconMail} flush empty={overview && emailFeed.length === 0 ? 'No CSM emails found.' : null}>
+          {!overview ? null : (
+            <EmailList
+              messages={emailFeed}
+              loading={false}
+              emptyText="No CSM emails found."
+              accent="#0078d4"
+            />
+          )}
+        </FeedPanel>
+      </div>
+    </div>
+  );
+}
+
 export default function UnifiedInbox({ clientsList, API_BASE, onConnectWhatsApp }) {
   const [query, setQuery] = useState('');
   const [deferredQuery, setDeferredQuery] = useState('');
@@ -590,14 +753,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, onConnectWhatsApp 
       </div>
 
       {!selected ? (
-        <div style={{
-          border: '1px dashed var(--line-strong, #dcdce4)', borderRadius: '12px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--ink-faint, #8a8a99)', fontSize: '13.5px',
-          textAlign: 'center', padding: '20px', lineHeight: 1.6
-        }}>
-          Pick a person on the left to see their<br />WhatsApp, Slack and email in one place.
-        </div>
+        <OverviewFeeds people={people} API_BASE={API_BASE} onSelect={setSelectedKey} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0, minWidth: 0 }}>
           <div style={{

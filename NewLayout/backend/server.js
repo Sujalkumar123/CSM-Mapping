@@ -7,7 +7,7 @@ import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
 import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages, setRosterPhones, getRosterSummaries } from './whatsapp.js';
-import { getEmailStatus, verifyEmailCreds, fetchEmailThread, sendEmail, resetEmailConnection, resetEmailTransport } from './email.js';
+import { getEmailStatus, verifyEmailCreds, fetchEmailThread, fetchRosterMail, sendEmail, resetEmailConnection, resetEmailTransport, setRosterEmails } from './email.js';
 import { cached, invalidate } from './cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -166,6 +166,13 @@ function getSlackDmChannel(token, slackId) {
   });
 }
 
+// Latest Slack message per person, for the Inbox landing screen. There's no
+// passive capture for Slack the way WhatsApp's message_create event gives
+// us one, so this only reflects CSMs whose thread has actually been opened
+// through the dashboard — grows with usage instead of eagerly fanning out
+// conversations.history calls across the whole roster on every page load.
+const slackSummaries = {};
+
 async function getSlackHistory(token, slackId) {
   return cached(`slackhist:${slackId}`, 30 * 1000, async () => {
     // Channel id and self id resolve concurrently; neither depends on the other
@@ -177,7 +184,7 @@ async function getSlackHistory(token, slackId) {
     const hist = await slackApiCall(token, 'conversations.history', { channel: channelId, limit: 30 });
     if (!hist.ok) throw new Error(`conversations.history: ${hist.error}`);
 
-    return (hist.messages || [])
+    const messages = (hist.messages || [])
       .filter(m => m.type === 'message' && !m.subtype)
       .map(m => ({
         id: m.ts,
@@ -186,6 +193,11 @@ async function getSlackHistory(token, slackId) {
         timestamp: Math.floor(parseFloat(m.ts))
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
+
+    if (messages.length > 0) {
+      slackSummaries[slackId] = messages[messages.length - 1];
+    }
+    return messages;
   });
 }
 
@@ -449,27 +461,40 @@ function readExcelData(forceReload = false) {
     };
   });
 
-  syncWhatsAppRoster(clientsCache);
+  syncRosters(clientsCache);
   return clientsCache;
 }
 
-// Keep the WhatsApp roster whitelist in lockstep with the sheet — every
-// reload and every write re-derives it, so a removed CSM stops being
-// reachable immediately rather than lingering in a stale allowlist.
-function syncWhatsAppRoster(clients) {
+// Keep the WhatsApp/email roster whitelists in lockstep with the sheet —
+// every reload and every write re-derives them, so a removed CSM stops
+// being reachable immediately rather than lingering in a stale allowlist.
+function syncRosters(clients) {
   const phones = [];
+  const emails = [];
+  const slackIds = new Set();
   clients.forEach(c => {
     if (c.csm1?.phone) phones.push(c.csm1.phone);
     if (c.csm2?.phone) phones.push(c.csm2.phone);
     if (c.lead?.phone) phones.push(c.lead.phone);
+    if (c.csm1?.email) emails.push(c.csm1.email);
+    if (c.csm2?.email) emails.push(c.csm2.email);
+    if (c.lead?.email) emails.push(c.lead.email);
+    if (c.csm1?.slack) slackIds.add(c.csm1.slack);
+    if (c.csm2?.slack) slackIds.add(c.csm2.slack);
   });
   setRosterPhones(phones);
+  setRosterEmails(emails);
+
+  // Drop cached Slack summaries for anyone no longer on the roster
+  Object.keys(slackSummaries).forEach(id => {
+    if (!slackIds.has(id)) delete slackSummaries[id];
+  });
 }
 
 // Write React schema items back to Excel and update cache
 function writeExcelData(clients) {
   clientsCache = clients;
-  syncWhatsAppRoster(clientsCache);
+  syncRosters(clientsCache);
   const originalHeaders = [
     "id", "legalName", "aliasBrand", "product", 
     "CSM Name 1", "CSM Contact", "CSM EmailId", 
@@ -775,6 +800,28 @@ app.get('/api/inbox', async (req, res) => {
   ]);
 
   res.json({ success: true, whatsapp, slack, email: mail });
+});
+
+// 8a-tris. The Inbox landing screen when nobody is selected — everything
+// touching the CSM roster in one call, not the other 450+ people at the
+// company. WhatsApp/email are cheap (already roster-scoped local reads);
+// Slack only reflects threads opened through the dashboard so far, since
+// there's no passive capture for it the way WhatsApp has.
+app.get('/api/inbox/overview', async (req, res) => {
+  try {
+    const rosterMail = getEmailStatus().configured
+      ? await fetchRosterMail(60).catch(() => [])
+      : [];
+
+    res.json({
+      success: true,
+      whatsapp: getRosterSummaries(),
+      slack: { ...slackSummaries },
+      email: rosterMail
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // 8b. Send one Slack DM

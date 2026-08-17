@@ -14,6 +14,19 @@ function getCreds() {
   return { user, pass };
 }
 
+// Same principle as the WhatsApp roster whitelist: this mailbox is your real
+// inbox, but the "everyone" overview should only ever surface mail tied to
+// a CSM — not the other 450+ people at the company who happen to email you.
+let rosterEmails = new Set();
+
+export function setRosterEmails(emails) {
+  rosterEmails = new Set((emails || []).map(e => String(e || '').toLowerCase().trim()).filter(Boolean));
+}
+
+function isRosterEmail(address) {
+  return rosterEmails.has(String(address || '').toLowerCase().trim());
+}
+
 export function getEmailStatus() {
   const creds = getCreds();
   if (!creds) return { configured: false };
@@ -144,12 +157,14 @@ async function loadMessages(client, creds, uids, limit) {
 
   const messages = await Promise.all(raw.map(async r => {
     const from = r.envelope?.from?.[0]?.address || '';
+    const to = (r.envelope?.to || []).map(t => t.address).filter(Boolean);
     const { body, snippet } = await decodeBody(r.source);
     return {
       id: String(r.uid),
       subject: r.envelope?.subject || '(no subject)',
       from,
       fromName: r.envelope?.from?.[0]?.name || from,
+      to,
       date: r.envelope?.date ? new Date(r.envelope.date).getTime() : Date.now(),
       fromMe: from.toLowerCase() === creds.user.toLowerCase(),
       body,
@@ -159,6 +174,36 @@ async function loadMessages(client, creds, uids, limit) {
   }));
 
   return messages.sort((a, b) => a.date - b.date);
+}
+
+// The merged "everyone" view for the Inbox landing screen — one bounded
+// scan of the mailbox, filtered to mail touching a roster address, instead
+// of a per-CSM IMAP search fanned out across 80+ people on every load.
+export function fetchRosterMail(limit = 60) {
+  return cached(`email:roster:${limit}`, 45 * 1000, () => loadRosterMail(limit));
+}
+
+function loadRosterMail(limit) {
+  return withImap(async (client, creds) => {
+    const mailbox = await resolveMailbox(client);
+    const lock = await client.getMailboxLock(mailbox);
+
+    try {
+      const uids = await client.search({ all: true }, { uid: true });
+      if (!uids || uids.length === 0) return [];
+
+      // Scan a bounded recent window, then keep only roster-relevant mail —
+      // scanning the whole mailbox to find a handful of CSM threads doesn't scale
+      const scanWindow = Math.min(uids.length, Math.max(limit * 4, 200));
+      const messages = await loadMessages(client, creds, uids, scanWindow);
+
+      return messages
+        .filter(m => isRosterEmail(m.from) || m.to.some(isRosterEmail))
+        .slice(-limit);
+    } finally {
+      lock.release();
+    }
+  });
 }
 
 function loadThread(address, limit) {
