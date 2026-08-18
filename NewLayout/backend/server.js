@@ -72,6 +72,28 @@ if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath);
 }
 
+// Broadcast attachments are meant to be sent once, not stored indefinitely —
+// nothing was ever deleting them, so every file anyone attached stayed on
+// disk forever. Filenames are already prefixed with Date.now() (see
+// storage.filename below), so age is readable straight from the name
+// without needing separate tracking.
+const UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function cleanupOldUploads() {
+  fs.readdir(uploadsPath, (err, files) => {
+    if (err) return;
+    const cutoff = Date.now() - UPLOAD_RETENTION_MS;
+    files.forEach(f => {
+      const uploadedAt = parseInt(f.split('-')[0], 10);
+      if (!uploadedAt || uploadedAt >= cutoff) return;
+      fs.unlink(path.join(uploadsPath, f), () => {});
+    });
+  });
+}
+
+cleanupOldUploads();
+setInterval(cleanupOldUploads, 6 * 60 * 60 * 1000);
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsPath);
