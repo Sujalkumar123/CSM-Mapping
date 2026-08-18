@@ -285,9 +285,44 @@ async function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
   }, 500);
 }
 
+// initWhatsApp() is called from three independent places (initial boot, the
+// 20s auto-retry-on-failure loop, and handleLogoutAndRestart's restart) with
+// no coordination between them. If a reset lands while a cold boot is still
+// mid-flight, both launch their own Puppeteer/Chrome against the same
+// profile directory — exactly the "Opening in existing browser session" /
+// launch Code: 0 failure this was producing. One flag, checked first, makes
+// every entry point agree only one attempt runs at a time.
+let initInFlight = false;
+let initQueued = false;
+
 export async function initWhatsApp() {
+  if (initInFlight) {
+    // Don't just drop this — e.g. a reset arriving mid-boot needs to still
+    // happen once the in-flight attempt clears, not vanish silently.
+    console.log('[WhatsApp] Init already in progress — queuing this call for right after.');
+    initQueued = true;
+    return;
+  }
+  initInFlight = true;
+  // Visible immediately, not just during a reset — otherwise the frontend's
+  // "still starting up" patience messaging never triggers during an actual
+  // slow cold start, which is the one case it exists for.
+  clientStatus = 'loading';
+
   console.log("Initializing WhatsApp background client...");
 
+  try {
+    await initWhatsAppInner();
+  } finally {
+    initInFlight = false;
+    if (initQueued) {
+      initQueued = false;
+      initWhatsApp();
+    }
+  }
+}
+
+async function initWhatsAppInner() {
   await ensureChromeInstalled();
 
   // Load local persistent cache
@@ -434,7 +469,13 @@ export async function initWhatsApp() {
     }
   });
 
-  client.initialize().catch(err => {
+  // Awaited (not fire-and-forget) so initWhatsApp()'s initInFlight guard
+  // stays held for the actual risky window — Chrome launching — not just
+  // the setup steps before it. Letting this run un-awaited was the gap that
+  // let an overlapping reset start a second Puppeteer launch mid-boot.
+  try {
+    await client.initialize();
+  } catch (err) {
     lastInitError = err.message || String(err);
     console.error("Failed to initialize WhatsApp client:", lastInitError);
     clientStatus = 'disconnected';
@@ -448,7 +489,7 @@ export async function initWhatsApp() {
     setTimeout(() => {
       if (clientStatus === 'disconnected') initWhatsApp();
     }, 20000);
-  });
+  }
 }
 
 export function getWhatsAppStatus() {
