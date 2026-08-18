@@ -56,10 +56,19 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
   }, [status, isOpen, onClose]);
 
   const handleReset = async () => {
-    // Mid-cold-start with no error yet, this is very likely someone about to
-    // restart a slow-but-working process out of impatience — that's the
-    // exact behavior that turns a single ~2min wait into a repeating loop
-    if (!qr && status === 'loading' && !lastError && waitSeconds < 90) {
+    // A QR is already showing — it's valid and waiting to be scanned. This
+    // is the actual gap that kept undoing working connections: resetting
+    // here throws away a functioning QR and restarts the ~2 minute cycle,
+    // with zero warning that anything was even lost.
+    if (qr && status === 'qr') {
+      const proceed = window.confirm(
+        `A QR code is already showing and ready to scan.\n\nResetting now will throw it away and restart the ~2 minute process from zero — scanning the code on screen is almost always faster. Reset anyway?`
+      );
+      if (!proceed) return;
+    } else if (!qr && status === 'loading' && !lastError && waitSeconds < 90) {
+      // Mid-cold-start with no error yet, this is very likely someone about to
+      // restart a slow-but-working process out of impatience — that's the
+      // exact behavior that turns a single ~2min wait into a repeating loop
       const proceed = window.confirm(
         `It's still starting up (${waitSeconds}s) with no error — this is likely just a slow cold start, not stuck.\n\nResetting now will throw away this progress and restart the ~2 minute process from zero. Reset anyway?`
       );
@@ -110,8 +119,17 @@ export default function WhatsAppConnectModal({ isOpen, onClose, API_BASE }) {
               </div>
 
               {qr ? (
-                <div style={{ background: '#fff', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--line-strong)' }}>
-                  <img src={qr} alt="Scan to link WhatsApp" style={{ width: '180px', height: '180px', display: 'block' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px',
+                    fontWeight: 700, color: '#1a8a4a'
+                  }}>
+                    <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#25D366' }} />
+                    Ready — scan now
+                  </div>
+                  <div style={{ background: '#fff', padding: '12px', borderRadius: 'var(--radius-md)', border: '2px solid #25D366' }}>
+                    <img src={qr} alt="Scan to link WhatsApp" style={{ width: '180px', height: '180px', display: 'block' }} />
+                  </div>
                 </div>
               ) : (
                 <div style={{ padding: '30px 0', color: 'var(--ink-soft)' }}>
