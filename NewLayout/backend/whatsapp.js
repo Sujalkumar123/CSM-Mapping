@@ -371,6 +371,10 @@ async function initWhatsAppInner() {
       '--no-first-run',
       '--no-zygote',
       '--disable-gpu',
+      // --disable-gpu alone still leaves a dedicated ~47MB GPU process
+      // running (it disables hardware accel, not the process itself) —
+      // this folds that work into the main browser process instead
+      '--in-process-gpu',
       '--disable-blink-features=AutomationControlled',
       // Chrome dying ~15-30s into launch with "Target closed" is the OOM
       // signature on Render's 512MB free-tier RAM — these trim the parts of
