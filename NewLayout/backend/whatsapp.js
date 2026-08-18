@@ -391,6 +391,15 @@ async function initWhatsAppInner() {
       '--metrics-recording-only',
       '--mute-audio',
       '--no-default-browser-check',
+      // Measured breakdown: 4 separate renderer processes were the single
+      // biggest cost (420MB of 781MB total) — Chrome's Site Isolation
+      // security feature spawns a new process per origin/frame as an
+      // XSS/Spectre mitigation. We're running one controlled automation
+      // session against one known site, not a general-purpose browser with
+      // untrusted tabs, so that isolation buys nothing here and just
+      // multiplies the same page's overhead by 4. This caps it at one.
+      '--disable-features=IsolateOrigins,site-per-process,site-per-process-forced',
+      '--renderer-process-limit=1',
       '--js-flags=--max-old-space-size=192',
       '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
