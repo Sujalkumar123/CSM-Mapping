@@ -184,10 +184,7 @@ export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect, fi
           {initials}
         </div>
         <div>
-          <div style={{ fontWeight: '600', fontSize: '14px', color: '#111' }}>{person?.name}</div>
-          <div style={{ fontSize: '11px', color: '#667781' }}>
-            {person?.phone || 'No phone'}
-          </div>
+          <div style={{ fontWeight: '600', fontSize: '14px', color: '#111' }}>{person?.name || 'Unknown'}</div>
         </div>
       </div>
 
