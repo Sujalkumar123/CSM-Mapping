@@ -12,6 +12,11 @@ const __dirname = path.dirname(__filename);
 let client = null;
 let qrCodeData = '';
 let clientStatus = 'disconnected'; // 'disconnected', 'qr', 'loading', 'ready'
+
+// How long a CSM's chat stays visible on the dashboard before it's dropped —
+// applied uniformly on every load/save/fetch, so a message older than this
+// simply stops appearing rather than needing an explicit cleanup job.
+const RETENTION_SECONDS = 15 * 24 * 60 * 60;
 // Surfaced through /api/whatsapp/status — without this, a launch failure on
 // a host we have no shell/log access to (Render) is completely invisible;
 // the process just sits at 'disconnected' forever with no way to diagnose it
@@ -62,16 +67,16 @@ function getCleanPhoneFromJid(jid) {
   return partBeforeColon.replace(/\D/g, '');
 }
 
-// Load history from local JSON file (retaining only last 24 hours of messages,
-// and only for numbers still on the CSM roster — older captures made before
-// roster-scoping existed can otherwise leak group chats / notification IDs
-// back into memory on every restart)
+// Load history from local JSON file (retaining only the last RETENTION_SECONDS
+// of messages, and only for numbers still on the CSM roster — older captures
+// made before roster-scoping existed can otherwise leak group chats /
+// notification IDs back into memory on every restart)
 function loadHistoryFromDisk() {
   try {
     if (fs.existsSync(chatHistoryPath)) {
       const data = JSON.parse(fs.readFileSync(chatHistoryPath, 'utf8'));
       const now = Math.floor(Date.now() / 1000);
-      const limit = now - 24 * 60 * 60; // 24 hours in seconds
+      const limit = now - RETENTION_SECONDS;
       let dropped = 0;
 
       Object.keys(data).forEach(phone => {
@@ -82,18 +87,18 @@ function loadHistoryFromDisk() {
         console.log(`Dropped ${dropped} cached thread(s) no longer on the CSM roster.`);
         saveHistoryToDisk();
       }
-      console.log('Loaded 24-hour chat history cache from disk.');
+      console.log('Loaded 15-day chat history cache from disk.');
     }
   } catch (e) {
     console.error('Error loading history cache:', e.message);
   }
 }
 
-// Write history to local JSON file (filtering to keep only last 24 hours)
+// Write history to local JSON file (filtering to keep only the retention window)
 function saveHistoryToDisk() {
   try {
     const now = Math.floor(Date.now() / 1000);
-    const limit = now - 24 * 60 * 60;
+    const limit = now - RETENTION_SECONDS;
     
     const dataToSave = {};
     Object.keys(messageStore).forEach(phone => {
@@ -538,14 +543,17 @@ export async function fetchChatHistory(phone) {
   const whatsappId = `${cleanPhone}@c.us`;
 
   const now = Math.floor(Date.now() / 1000);
-  const limit = now - 24 * 60 * 60; // 24 hours in seconds
+  const limit = now - RETENTION_SECONDS;
 
   try {
     if (clientStatus !== 'ready') throw new Error('Not ready');
     const chat = await client.getChatById(whatsappId);
-    const msgs = await chat.fetchMessages({ limit: 50 });
-    
-    // Convert to simplified layout and filter to last 24 hours
+    // 50 messages barely covers a couple of days for an active chat — this
+    // pulls real WhatsApp history (not just what's flowed through the
+    // dashboard), so it needs enough headroom to actually fill 15 days
+    const msgs = await chat.fetchMessages({ limit: 200 });
+
+    // Convert to simplified layout and filter to the retention window
     const result = msgs
       .filter(m => m.timestamp >= limit)
       .map(m => ({
@@ -576,12 +584,12 @@ export async function fetchChatHistory(phone) {
   }
 }
 
-// Get only in-memory messages (for polling new incoming, limited to 24 hours)
+// Get only in-memory messages (for polling new incoming, within the retention window)
 export function getStoredMessages(phone) {
   const cleanPhone = normalizePhone(phone);
   if (!isRosterPhone(cleanPhone)) return [];
   const now = Math.floor(Date.now() / 1000);
-  const limit = now - 24 * 60 * 60;
+  const limit = now - RETENTION_SECONDS;
   return (messageStore[cleanPhone] || []).filter(m => m.timestamp >= limit);
 }
 
