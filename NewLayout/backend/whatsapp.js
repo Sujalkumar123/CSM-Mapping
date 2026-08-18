@@ -1,30 +1,44 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth, MessageMedia } = pkg;
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers
+} from 'baileys';
+import pino from 'pino';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
-import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Baileys speaks WhatsApp's protocol directly over WebSocket — no Chrome, no
+// Puppeteer. Measured: ~50MB for this whole session vs. ~620MB for the old
+// whatsapp-web.js/Chrome stack, which is what was blowing Render's 512MB
+// free-tier limit. This is a fresh auth store (.baileys_auth, not
+// .wwebjs_auth) — the old session format doesn't carry over, so this needs
+// one new QR scan after deploying, same as any first-time connect.
+const authDir = path.join(__dirname, '.baileys_auth');
+
 let client = null;
 let qrCodeData = '';
 let clientStatus = 'disconnected'; // 'disconnected', 'qr', 'loading', 'ready'
+let lastInitError = '';
 
 // How long a CSM's chat stays visible on the dashboard before it's dropped —
 // applied uniformly on every load/save/fetch, so a message older than this
 // simply stops appearing rather than needing an explicit cleanup job.
 const RETENTION_SECONDS = 15 * 24 * 60 * 60;
-// Surfaced through /api/whatsapp/status — without this, a launch failure on
-// a host we have no shell/log access to (Render) is completely invisible;
-// the process just sits at 'disconnected' forever with no way to diagnose it
-let lastInitError = '';
 
 // In-memory message store: { [cleanPhone]: [{id, body, fromMe, timestamp}] }
 const messageStore = {};
 const chatHistoryPath = path.join(__dirname, 'chat_history.json');
+
+// Quiet by default — Baileys' own logger is fairly verbose at info level,
+// which would flood Render's logs; our own console.log calls below cover
+// the events we actually care about.
+const logger = pino({ level: 'silent' });
 
 function normalizePhone(phone) {
   let clean = String(phone || '').replace(/\D/g, '');
@@ -59,12 +73,40 @@ export function getRosterSummaries() {
   return summaries;
 }
 
-// Safely clean JID to phone number, handling multi-device suffixes (e.g. '919999999999:1@c.us' -> '919999999999')
+// Baileys JIDs look like '919999999999@s.whatsapp.net' (individuals) or
+// '...@g.us' (groups) — strip the suffix and any device-id segment down to
+// a plain phone number, same idea as the old @c.us stripping.
 function getCleanPhoneFromJid(jid) {
   if (!jid) return '';
   const partBeforeAt = jid.split('@')[0];
   const partBeforeColon = partBeforeAt.split(':')[0];
   return partBeforeColon.replace(/\D/g, '');
+}
+
+function toJid(cleanPhone) {
+  return `${cleanPhone}@s.whatsapp.net`;
+}
+
+// messageTimestamp can arrive as a plain number or a protobuf Long — this
+// normalizes either into a plain unix-seconds number safely.
+function toUnixSeconds(ts) {
+  if (ts == null) return Math.floor(Date.now() / 1000);
+  if (typeof ts === 'number') return ts;
+  if (typeof ts.toNumber === 'function') return ts.toNumber();
+  return Number(ts) || Math.floor(Date.now() / 1000);
+}
+
+// Baileys nests message content by type instead of a flat .body string —
+// this covers the shapes a CSM conversation will actually produce.
+function extractMessageText(m) {
+  const c = m?.message;
+  if (!c) return '';
+  return c.conversation
+    || c.extendedTextMessage?.text
+    || c.imageMessage?.caption
+    || c.videoMessage?.caption
+    || c.documentMessage?.caption
+    || '';
 }
 
 // Load history from local JSON file (retaining only the last RETENTION_SECONDS
@@ -99,7 +141,7 @@ function saveHistoryToDisk() {
   try {
     const now = Math.floor(Date.now() / 1000);
     const limit = now - RETENTION_SECONDS;
-    
+
     const dataToSave = {};
     Object.keys(messageStore).forEach(phone => {
       const filtered = messageStore[phone].filter(msg => msg.timestamp >= limit);
@@ -108,216 +150,51 @@ function saveHistoryToDisk() {
       }
       messageStore[phone] = filtered; // Clean memory map
     });
-    
+
     fs.writeFileSync(chatHistoryPath, JSON.stringify(dataToSave, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving history cache:', e.message);
   }
 }
 
-import puppeteer from 'puppeteer';
-
-// Helper to find Chrome path on Windows & Linux (Render / Cloud servers)
-function getChromePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
-    return process.env.CHROME_PATH;
-  }
-
-  const paths = [
-    // Windows
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.PROGRAMFILES + '\\Google\\Chrome\\Application\\chrome.exe',
-    process.env['PROGRAMFILES(X86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
-    // Linux (Render, Heroku, Docker)
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/snap/bin/chromium'
-  ];
-
-  for (const p of paths) {
-    if (p && fs.existsSync(p)) return p;
-  }
-
-  try {
-    const pPath = puppeteer.executablePath();
-    if (pPath && fs.existsSync(pPath)) return pPath;
-  } catch (e) {}
-
-  return null;
+// Record one message into the roster-scoped store, deduped by id, kept sorted
+function recordMessage(phone, entry) {
+  if (!messageStore[phone]) messageStore[phone] = [];
+  const exists = messageStore[phone].some(m => m.id === entry.id);
+  if (exists) return false;
+  messageStore[phone].push(entry);
+  messageStore[phone].sort((a, b) => a.timestamp - b.timestamp);
+  return true;
 }
 
-// On Render, the build-time `npx puppeteer browsers install chrome` step can
-// resolve to a *different* puppeteer copy than the one this file actually
-// imports (npm hoisting / --prefix quirks), so the Chrome build it downloads
-// doesn't match what puppeteer.executablePath() expects at runtime — the
-// binary is simply never where this process looks for it. Rather than keep
-// guessing at the build config from outside, install it ourselves, in-process,
-// using the exact puppeteer module already imported here — that guarantees
-// the version matches by construction, no build step involved at all.
-async function ensureChromeInstalled() {
-  if (getChromePath()) return true;
-
-  console.log('[WhatsApp] No Chrome binary found — installing one now (first boot only, may take ~30-60s)...');
-  try {
-    await new Promise((resolve, reject) => {
-      execFile('npx', ['puppeteer', 'browsers', 'install', 'chrome'], { cwd: __dirname, timeout: 120000 }, (err, stdout, stderr) => {
-        if (err) return reject(err);
-        resolve();
-      });
-    });
-    console.log('[WhatsApp] Chrome install finished.');
-  } catch (err) {
-    console.error('[WhatsApp] Self-install of Chrome failed:', err.message);
-  }
-
-  return !!getChromePath();
-}
-
-let isRestarting = false;
-
-function isPidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === 'EPERM';
-  }
-}
-
-// taskkill /T kills the whole process tree (GPU/renderer/crashpad helpers
-// included) — killing just the main PID on Windows can leave those orphaned,
-// which is exactly what left a dead Chrome holding the profile lock forever.
-function forceKillProcessTree(pid) {
-  return new Promise((resolve) => {
-    if (!pid) return resolve();
-    if (process.platform === 'win32') {
-      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => resolve());
-    } else {
-      try { process.kill(pid, 'SIGKILL'); } catch (e) {}
-      resolve();
-    }
-  });
-}
-
-// client.destroy() resolving is not proof the OS process actually exited —
-// in practice it sometimes leaves an orphaned headless Chrome that holds the
-// session profile locked, so every subsequent reset/reconnect hangs forever
-// waiting on a lock nothing will ever release. Verify, and force-kill if not.
-async function ensureBrowserClosed(oldClient) {
-  const browserProcess = oldClient?.pupBrowser?.process?.();
-  const pid = browserProcess?.pid;
-
-  try {
-    await Promise.race([
-      oldClient.destroy(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('destroy timeout')), 4000))
-    ]);
-  } catch (e) {
-    // destroy() hung, or the page was already dead underneath it — either
-    // way, fall through to the PID check below rather than trusting it
-  }
-
-  if (pid && isPidAlive(pid)) {
-    console.log(`[WhatsApp Auto-Recovery] Browser process ${pid} still alive after destroy() — force-killing.`);
-    await forceKillProcessTree(pid);
-  }
-}
-
-// Only a genuine unlink invalidates the stored session. A dropped network,
-// a sleeping laptop or a phone that went offline all raise 'disconnected'
-// too — wiping auth data for those means re-scanning a QR code over a blip,
-// which is the opposite of staying logged in.
-const UNRECOVERABLE = ['LOGOUT', 'UNPAIRED', 'UNPAIRED_IDLE'];
-
-function isUnrecoverable(reason) {
-  return UNRECOVERABLE.some(r => String(reason || '').toUpperCase().includes(r));
-}
-
-async function handleLogoutAndRestart(reason, { wipeSession = false } = {}) {
-  if (isRestarting) return;
-  isRestarting = true;
-  console.log('\n============================================================');
-  console.log(`  [WhatsApp Auto-Recovery] Disconnected (Reason: ${reason})`);
-  console.log(wipeSession
-    ? '  Session is no longer valid — clearing auth data and issuing a new QR.'
-    : '  Reconnecting with the saved session (auth data kept).');
-  console.log('============================================================\n');
-
-  clientStatus = 'loading';
-  qrCodeData = '';
-
-  // Wait for (and if needed, force) the old browser process to actually die
-  // before touching its profile directory or launching a new one — skipping
-  // this is exactly what left an orphaned Chrome holding the session lock
-  // forever, hanging every subsequent connect attempt.
-  if (client) {
-    const oldClient = client;
-    client = null;
-    await ensureBrowserClosed(oldClient);
-  }
-
-  const restart = () => {
-    setTimeout(() => {
-      isRestarting = false;
-      initWhatsApp();
-    }, 500);
-  };
-
-  if (!wipeSession) {
-    // Reconnect against the existing LocalAuth data — no re-scan needed
-    setTimeout(restart, 500);
-    return;
-  }
-
-  // Small delay so LocalAuth's own internal unlinking (if any) settles
-  // before we sweep the directory ourselves
-  setTimeout(() => {
-    const authDir = path.join(__dirname, '.wwebjs_auth');
-    fs.rm(authDir, { recursive: true, force: true }, (err) => {
-      if (!err) {
-        console.log('[WhatsApp Auto-Recovery] Cleared stale session data directory.');
-      } else {
-        console.error('[WhatsApp Auto-Recovery] Could not fully clear session directory:', err.message);
-      }
-      restart();
-    });
-  }, 500);
-}
-
-// initWhatsApp() is called from three independent places (initial boot, the
-// 20s auto-retry-on-failure loop, and handleLogoutAndRestart's restart) with
-// no coordination between them. If a reset lands while a cold boot is still
-// mid-flight, both launch their own Puppeteer/Chrome against the same
-// profile directory — exactly the "Opening in existing browser session" /
-// launch Code: 0 failure this was producing. One flag, checked first, makes
-// every entry point agree only one attempt runs at a time.
+// initWhatsApp() can be triggered from three places (initial boot, the retry
+// loop on failure, and a manual reset) with no natural coordination between
+// them — this flag keeps only one connect attempt in flight at a time, and
+// queues (rather than drops) a call that arrives mid-attempt.
 let initInFlight = false;
 let initQueued = false;
 
 export async function initWhatsApp() {
   if (initInFlight) {
-    // Don't just drop this — e.g. a reset arriving mid-boot needs to still
-    // happen once the in-flight attempt clears, not vanish silently.
     console.log('[WhatsApp] Init already in progress — queuing this call for right after.');
     initQueued = true;
     return;
   }
   initInFlight = true;
-  // Visible immediately, not just during a reset — otherwise the frontend's
-  // "still starting up" patience messaging never triggers during an actual
-  // slow cold start, which is the one case it exists for.
   clientStatus = 'loading';
-
-  console.log("Initializing WhatsApp background client...");
+  console.log('Initializing WhatsApp background client...');
 
   try {
     await initWhatsAppInner();
+  } catch (err) {
+    lastInitError = err.message || String(err);
+    console.error('Failed to initialize WhatsApp client:', lastInitError);
+    clientStatus = 'disconnected';
+    qrCodeData = '';
+    console.log('[WhatsApp] Retrying initialization in 20s...');
+    setTimeout(() => {
+      if (clientStatus === 'disconnected') initWhatsApp();
+    }, 20000);
   } finally {
     initInFlight = false;
     if (initQueued) {
@@ -328,186 +205,136 @@ export async function initWhatsApp() {
 }
 
 async function initWhatsAppInner() {
-  await ensureChromeInstalled();
-
-  // Load local persistent cache
   loadHistoryFromDisk();
-  
-  // Auto-clean any stale Chromium lock files left by crashed previous runs
-  const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session');
-  const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort'];
-  
-  const cleanLocks = (dir) => {
-    if (!fs.existsSync(dir)) return;
-    lockFiles.forEach(f => {
-      const lockPath = path.join(dir, f);
-      try {
-        if (fs.existsSync(lockPath)) {
-          fs.unlinkSync(lockPath);
-          console.log(`Cleaned up stale lock file: ${f}`);
-        }
-      } catch (e) {
-        // Ignore errors if file is locked/not deletable
-      }
-    });
-  };
-  cleanLocks(sessionDir);
-  cleanLocks(path.join(sessionDir, 'Default'));
-  
-  const puppeteerOpts = {
-    headless: true,
-    // Default 30s timeout + silent Chrome stderr meant a launch failure on
-    // Render showed only Puppeteer's generic "WS endpoint never appeared" —
-    // the actual reason (missing shared lib, OOM, etc.) was never visible.
-    // dumpio pipes Chrome's real stderr into our own logs; the longer
-    // timeout gives a genuinely slow (not crashing) cold start room to finish.
-    timeout: 90000,
-    dumpio: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu',
-      // --disable-gpu alone still leaves a dedicated ~47MB GPU process
-      // running (it disables hardware accel, not the process itself) —
-      // this folds that work into the main browser process instead
-      '--in-process-gpu',
-      '--disable-blink-features=AutomationControlled',
-      // Chrome dying ~15-30s into launch with "Target closed" is the OOM
-      // signature on Render's 512MB free-tier RAM — these trim the parts of
-      // Chrome's footprint that headless WhatsApp Web never needs anyway.
-      // NOTE: --single-process was tried here and reverted — it broke
-      // navigation ("frame was detached") on both Windows and, per Chrome's
-      // own docs, is increasingly unsupported/unstable in modern Chrome
-      // generally, not just on this platform.
-      '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-breakpad',
-      '--disable-component-update',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--metrics-recording-only',
-      '--mute-audio',
-      '--no-default-browser-check',
-      // Measured breakdown: 4 separate renderer processes were the single
-      // biggest cost (420MB of 781MB total) — Chrome's Site Isolation
-      // security feature spawns a new process per origin/frame as an
-      // XSS/Spectre mitigation. We're running one controlled automation
-      // session against one known site, not a general-purpose browser with
-      // untrusted tabs, so that isolation buys nothing here and just
-      // multiplies the same page's overhead by 4. This caps it at one.
-      '--disable-features=IsolateOrigins,site-per-process,site-per-process-forced',
-      '--renderer-process-limit=1',
-      '--js-flags=--max-old-space-size=192',
-      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    ]
-  };
-  
-  // Use system Chrome for best compatibility on Windows
-  const chromePath = getChromePath();
-  if (chromePath) {
-    console.log(`Using system Chrome at: ${chromePath}`);
-    puppeteerOpts.executablePath = chromePath;
-  }
 
-  client = new Client({
-    authStrategy: new LocalAuth({
-      dataPath: path.join(__dirname, '.wwebjs_auth')
-    }),
-    puppeteer: puppeteerOpts
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { version } = await fetchLatestBaileysVersion();
+
+  client = makeWASocket({
+    auth: state,
+    version,
+    logger,
+    browser: Browsers.ubuntu('Chrome'),
+    // We render our own QR image via the qrcode package instead
+    printQRInTerminal: false,
+    // Pulls real prior conversation history on first connect (feeds the
+    // messaging-history.set handler below) instead of starting from empty
+    syncFullHistory: true,
+    markOnlineOnConnect: false
   });
 
-  client.on('qr', async (qr) => {
-    try {
-      qrCodeData = await qrcode.toDataURL(qr);
-      clientStatus = 'qr';
+  client.ev.on('creds.update', saveCreds);
+
+  client.ev.on('connection.update', async (update) => {
+    const { connection, qr, lastDisconnect } = update;
+
+    if (qr) {
+      try {
+        qrCodeData = await qrcode.toDataURL(qr);
+        clientStatus = 'qr';
+        console.log('\n============================================================');
+        console.log('  [WhatsApp] QR Code generated! Scan it in the dashboard UI.');
+        console.log('============================================================\n');
+      } catch (err) {
+        console.error('Failed to convert QR code to data URL:', err.message);
+      }
+      return;
+    }
+
+    if (connection === 'open') {
+      clientStatus = 'ready';
+      qrCodeData = '';
+      lastInitError = '';
+      console.log('✅ WhatsApp client is ready and connected!');
+      return;
+    }
+
+    if (connection === 'connecting') {
+      clientStatus = 'loading';
+      return;
+    }
+
+    if (connection === 'close') {
+      // Only a genuine unlink invalidates the stored session. A dropped
+      // network, a sleeping laptop or a phone that went offline all raise
+      // 'close' too — wiping auth data for those means re-scanning a QR
+      // over a blip, which is the opposite of staying logged in.
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut = statusCode === DisconnectReason.loggedOut;
+
+      console.log('WhatsApp connection closed:', lastDisconnect?.error?.message || statusCode || 'unknown reason');
+      clientStatus = 'loading';
+      qrCodeData = '';
+      client = null;
+
+      if (!loggedOut) {
+        setTimeout(() => initWhatsApp(), 500);
+        return;
+      }
+
       console.log('\n============================================================');
-      console.log('  [WhatsApp] QR Code generated! Scan it in the dashboard UI.');
+      console.log('  [WhatsApp Auto-Recovery] Logged out — clearing auth data and issuing a new QR.');
       console.log('============================================================\n');
-    } catch (err) {
-      console.error('Failed to convert QR code to data URL:', err.message);
+      fs.rm(authDir, { recursive: true, force: true }, () => {
+        setTimeout(() => initWhatsApp(), 500);
+      });
     }
   });
 
-  client.on('ready', () => {
-    clientStatus = 'ready';
-    qrCodeData = '';
-    lastInitError = '';
-    console.log('✅ WhatsApp client is ready and connected!');
-  });
+  // First-connect history push — real prior WhatsApp conversation history,
+  // not just messages sent through the dashboard. Baileys delivers this as
+  // one bulk event rather than an on-demand per-chat fetch.
+  client.ev.on('messaging-history.set', ({ messages }) => {
+    let added = 0;
+    for (const m of messages || []) {
+      const jid = m.key?.remoteJid;
+      if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
+      const phone = getCleanPhoneFromJid(jid);
+      if (!phone || !isRosterPhone(phone)) continue;
 
-  client.on('authenticated', () => {
-    clientStatus = 'loading';
-    console.log('WhatsApp authenticated successfully.');
-  });
+      const body = extractMessageText(m);
+      if (!body) continue; // skip non-text history entries (calls, system events, etc.)
 
-  client.on('auth_failure', (msg) => {
-    // Stored credentials were rejected — the session really is dead
-    console.error('WhatsApp authentication failure:', msg);
-    handleLogoutAndRestart('auth_failure: ' + msg, { wipeSession: true });
-  });
-
-  client.on('disconnected', (reason) => {
-    console.log('WhatsApp client was disconnected:', reason);
-    handleLogoutAndRestart('disconnected: ' + reason, { wipeSession: isUnrecoverable(reason) });
+      const added_ = recordMessage(phone, {
+        id: m.key.id,
+        body,
+        fromMe: !!m.key.fromMe,
+        timestamp: toUnixSeconds(m.messageTimestamp),
+        type: 'chat'
+      });
+      if (added_) added++;
+    }
+    if (added > 0) {
+      console.log(`[WhatsApp] Synced ${added} historical message(s) for CSM roster contacts.`);
+      saveHistoryToDisk();
+    }
   });
 
   // Capture messages for CSM roster contacts only — this account is your
   // real WhatsApp, but the dashboard should only ever remember chats with
   // the people you've named, not every personal conversation on your phone
-  client.on('message_create', (msg) => {
-    // Resolve the target phone number depending on whether the message is outgoing (to) or incoming (from)
-    const targetJid = msg.fromMe ? msg.to : msg.from;
-    const phone = getCleanPhoneFromJid(targetJid);
-    if (!phone || !isRosterPhone(phone)) return;
+  client.ev.on('messages.upsert', ({ messages }) => {
+    for (const m of messages || []) {
+      const jid = m.key?.remoteJid;
+      if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
+      const phone = getCleanPhoneFromJid(jid);
+      if (!phone || !isRosterPhone(phone)) continue;
 
-    console.log(`[WhatsApp] Message event: ${msg.fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${msg.body || '(media)'}"`);
+      const body = extractMessageText(m);
+      const fromMe = !!m.key.fromMe;
 
-    if (!messageStore[phone]) messageStore[phone] = [];
+      console.log(`[WhatsApp] Message event: ${fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${body || '(media)'}"`);
 
-    // Avoid duplicate message IDs
-    const exists = messageStore[phone].some(m => m.id === msg.id._serialized);
-    if (!exists) {
-      messageStore[phone].push({
-        id: msg.id._serialized,
-        body: msg.body || '',
-        fromMe: msg.fromMe,
-        timestamp: msg.timestamp,
-        type: msg.type || 'chat'
+      const added = recordMessage(phone, {
+        id: m.key.id,
+        body,
+        fromMe,
+        timestamp: toUnixSeconds(m.messageTimestamp),
+        type: 'chat'
       });
-      // Sort to preserve correct chronological order
-      messageStore[phone].sort((a, b) => a.timestamp - b.timestamp);
-      saveHistoryToDisk();
+      if (added) saveHistoryToDisk();
     }
   });
-
-  // Awaited (not fire-and-forget) so initWhatsApp()'s initInFlight guard
-  // stays held for the actual risky window — Chrome launching — not just
-  // the setup steps before it. Letting this run un-awaited was the gap that
-  // let an overlapping reset start a second Puppeteer launch mid-boot.
-  try {
-    await client.initialize();
-  } catch (err) {
-    lastInitError = err.message || String(err);
-    console.error("Failed to initialize WhatsApp client:", lastInitError);
-    clientStatus = 'disconnected';
-    qrCodeData = '';
-
-    // A launch failure otherwise sticks at 'disconnected' forever with no
-    // way to recover short of a manual reset. Most causes on a fresh host
-    // (transient resource pressure on cold start) clear up on their own —
-    // retry with backoff instead of requiring someone to notice and click reset.
-    console.log('[WhatsApp] Retrying initialization in 20s...');
-    setTimeout(() => {
-      if (clientStatus === 'disconnected') initWhatsApp();
-    }, 20000);
-  }
 }
 
 export function getWhatsAppStatus() {
@@ -519,7 +346,7 @@ export function getWhatsAppStatus() {
 }
 
 export async function sendWhatsAppMessage(phone, text) {
-  if (clientStatus !== 'ready') {
+  if (clientStatus !== 'ready' || !client) {
     throw new Error('WhatsApp client is not connected.');
   }
   const cleanPhone = normalizePhone(phone);
@@ -527,13 +354,14 @@ export async function sendWhatsAppMessage(phone, text) {
     throw new Error('This number is not on the CSM roster.');
   }
 
-  const whatsappId = `${cleanPhone}@c.us`;
-  await client.sendMessage(whatsappId, text);
+  await client.sendMessage(toJid(cleanPhone), { text });
   return { success: true };
 }
+
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp)$/i;
 
 export async function sendWhatsAppMedia(phone, filePath, caption) {
-  if (clientStatus !== 'ready') {
+  if (clientStatus !== 'ready' || !client) {
     throw new Error('WhatsApp client is not connected.');
   }
   const cleanPhone = normalizePhone(phone);
@@ -541,60 +369,25 @@ export async function sendWhatsAppMedia(phone, filePath, caption) {
     throw new Error('This number is not on the CSM roster.');
   }
 
-  const whatsappId = `${cleanPhone}@c.us`;
-  const media = MessageMedia.fromFilePath(filePath);
-  // Send media with the provided caption (message text or filename fallback)
-  await client.sendMessage(whatsappId, media, { caption: caption || '' });
+  const jid = toJid(cleanPhone);
+  const content = IMAGE_EXTENSIONS.test(filePath)
+    ? { image: { url: filePath }, caption: caption || '' }
+    : { document: { url: filePath }, fileName: path.basename(filePath), caption: caption || '' };
+
+  await client.sendMessage(jid, content);
   return { success: true };
 }
 
-// Fetch real chat history from WhatsApp Web for a given phone number —
-// restricted to the CSM roster, so the dashboard never surfaces a personal chat
+// Real WhatsApp history for a roster contact. Unlike whatsapp-web.js, Baileys
+// has no on-demand "fetch this chat's messages" call — history arrives
+// passively via messaging-history.set on connect and messages.upsert as it
+// happens, both already feeding messageStore, so this just reads it back.
 export async function fetchChatHistory(phone) {
   const cleanPhone = normalizePhone(phone);
   if (!isRosterPhone(cleanPhone)) return [];
-  const whatsappId = `${cleanPhone}@c.us`;
-
   const now = Math.floor(Date.now() / 1000);
   const limit = now - RETENTION_SECONDS;
-
-  try {
-    if (clientStatus !== 'ready') throw new Error('Not ready');
-    const chat = await client.getChatById(whatsappId);
-    // 50 messages barely covers a couple of days for an active chat — this
-    // pulls real WhatsApp history (not just what's flowed through the
-    // dashboard), so it needs enough headroom to actually fill 15 days
-    const msgs = await chat.fetchMessages({ limit: 200 });
-
-    // Convert to simplified layout and filter to the retention window
-    const result = msgs
-      .filter(m => m.timestamp >= limit)
-      .map(m => ({
-        id: m.id._serialized,
-        body: m.body || '',
-        fromMe: m.fromMe,
-        timestamp: m.timestamp,
-        type: m.type || 'chat'
-      }));
-
-    // Merge into local cache store
-    if (!messageStore[cleanPhone]) messageStore[cleanPhone] = [];
-    result.forEach(newMsg => {
-      const exists = messageStore[cleanPhone].some(m => m.id === newMsg.id);
-      if (!exists) {
-        messageStore[cleanPhone].push(newMsg);
-      }
-    });
-
-    // Keep memory map sorted & saved
-    messageStore[cleanPhone].sort((a, b) => a.timestamp - b.timestamp);
-    saveHistoryToDisk();
-
-    return messageStore[cleanPhone].filter(m => m.timestamp >= limit);
-  } catch (e) {
-    // Fallback to locally stored history
-    return (messageStore[cleanPhone] || []).filter(msg => msg.timestamp >= limit);
-  }
+  return (messageStore[cleanPhone] || []).filter(m => m.timestamp >= limit);
 }
 
 // Get only in-memory messages (for polling new incoming, within the retention window)
@@ -606,9 +399,25 @@ export function getStoredMessages(phone) {
   return (messageStore[cleanPhone] || []).filter(m => m.timestamp >= limit);
 }
 
-// Reset WhatsApp session completely (delete session dir & start fresh client)
+// Reset WhatsApp session completely (delete auth dir & start fresh client) —
+// explicit user action from the UI, always means "force a re-scan"
 export async function resetWhatsApp() {
-  // Explicit user action from the UI — this one is meant to force a re-scan
-  await handleLogoutAndRestart('manual_reset', { wipeSession: true });
+  console.log('\n============================================================');
+  console.log('  [WhatsApp Auto-Recovery] Manual reset — clearing auth data and issuing a new QR.');
+  console.log('============================================================\n');
+
+  clientStatus = 'loading';
+  qrCodeData = '';
+
+  if (client) {
+    try { client.end(new Error('manual_reset')); } catch (e) {}
+    client = null;
+  }
+
+  await new Promise(resolve => {
+    fs.rm(authDir, { recursive: true, force: true }, () => resolve());
+  });
+
+  await initWhatsApp();
   return { success: true };
 }

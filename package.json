@@ -4,17 +4,16 @@
   "type": "module",
   "scripts": {
     "build:frontend": "npm install --include=dev --prefix NewLayout/frontend && npm run build --prefix NewLayout/frontend",
-    "build:backend": "npm install --prefix NewLayout/backend && npx puppeteer browsers install chrome",
+    "build:backend": "npm install --prefix NewLayout/backend",
     "build": "npm run build:frontend && npm run build:backend",
-    "postinstall": "npx puppeteer browsers install chrome",
     "start": "node NewLayout/backend/server.js"
   },
   "dependencies": {
+    "baileys": "^7.0.0-rc14",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "puppeteer": "^24.0.0",
+    "pino": "^10.3.1",
     "qrcode": "^1.5.4",
-    "whatsapp-web.js": "^1.34.7",
     "xlsx": "^0.18.5"
   }
 }

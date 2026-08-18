@@ -27,6 +27,8 @@ Thumbs.db
 **/.wwebjs_auth/
 **/NewLayout/backend/.wwebjs_auth/
 **/.wwebjs_cache/
+**/.baileys_auth/
+**/NewLayout/backend/.baileys_auth/
 **/NewLayout/backend/chat_history.json
 
 .vercel
