@@ -144,7 +144,7 @@ let lastInitError = '';
 // How long a CSM's chat stays visible on the dashboard before it's dropped —
 // applied uniformly on every load/save/fetch, so a message older than this
 // simply stops appearing rather than needing an explicit cleanup job.
-const RETENTION_SECONDS = 5 * 24 * 60 * 60;
+const RETENTION_SECONDS = 15 * 24 * 60 * 60;
 
 // In-memory message store: { [cleanPhone]: [{id, body, fromMe, timestamp}] }
 const messageStore = {};
