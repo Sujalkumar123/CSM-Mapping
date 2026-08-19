@@ -817,7 +817,6 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
   const [threads, setThreads] = useState(null);
   const [readerMail, setReaderMail] = useState(null);
   const [expandedChannel, setExpandedChannel] = useState(null);
-  const [loading, setLoading] = useState(false);
 
   // Derived once per data change instead of once per render
   const people = useMemo(() => buildPeople(clientsList), [clientsList]);
@@ -839,36 +838,67 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
     [people, selectedKey]
   );
 
-  // Every channel in one request, so a slow mailbox never delays Slack/WhatsApp
+  // Each channel fetches independently — WhatsApp/Slack resolve in well
+  // under a second, but a cold (uncached) Gmail IMAP search on a large
+  // mailbox can take several seconds. Bundling all three behind one
+  // request meant switching people always waited for the slowest one; now
+  // WhatsApp and Slack render immediately while Email shows its own
+  // "Loading…" state until it's ready.
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
 
-    setLoading(true);
-    setThreads(null);
+    setThreads({
+      whatsapp: { messages: [], loading: !!selected.phone, available: !!selected.phone, reason: 'No phone number on file' },
+      slack: { messages: [], loading: !!selected.slack, available: !!selected.slack, reason: 'No Slack ID on file' },
+      email: { messages: [], loading: !!selected.email, available: !!selected.email, reason: 'No email address on file' }
+    });
 
-    const params = new URLSearchParams();
-    if (selected.phone) params.set('phone', selected.phone);
-    if (selected.slack) params.set('slackId', selected.slack);
-    if (selected.email) params.set('email', selected.email);
+    const setChannel = (channel, patch) => {
+      if (cancelled) return;
+      setThreads(prev => prev && ({ ...prev, [channel]: { ...prev[channel], ...patch, loading: false } }));
+    };
 
-    fetch(`${API_BASE}/api/inbox?${params}`)
-      .then(r => r.json())
-      .then(d => {
-        if (cancelled) return;
-        setThreads({
-          whatsapp: d.whatsapp,
-          slack: d.slack,
-          email: {
-            ...d.email,
-            messages: (d.email?.messages || []).map(m => ({ ...m, timestamp: Math.floor(m.date / 1000) }))
+    if (selected.phone) {
+      fetch(`${API_BASE}/api/whatsapp/status`)
+        .then(r => r.json())
+        .then(status => {
+          if (status.status !== 'ready') {
+            setChannel('whatsapp', { messages: [], error: 'NOT_CONNECTED' });
+            return null;
           }
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setThreads(null);
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
+          return fetch(`${API_BASE}/api/whatsapp/messages/${encodeURIComponent(selected.phone)}`).then(r => r.json());
+        })
+        .then(d => {
+          if (!d) return;
+          setChannel('whatsapp', { messages: d.messages || [], error: !d.success ? (d.error || 'Could not load WhatsApp messages.') : undefined });
+        })
+        .catch(() => setChannel('whatsapp', { messages: [], error: 'Could not load WhatsApp messages.' }));
+    }
+
+    if (selected.slack) {
+      fetch(`${API_BASE}/api/slack/history/${encodeURIComponent(selected.slack)}`)
+        .then(r => r.json())
+        .then(d => setChannel('slack', { messages: d.messages || [], error: !d.success ? (d.error || 'Could not load Slack messages.') : undefined }))
+        .catch(() => setChannel('slack', { messages: [], error: 'Could not load Slack messages.' }));
+    }
+
+    if (selected.email) {
+      fetch(`${API_BASE}/api/email/thread/${encodeURIComponent(selected.email)}`)
+        .then(r => r.json())
+        .then(d => {
+          if (!d.success) {
+            const notConfigured = d.error === 'NOT_CONFIGURED' || d.error === 'Email is not configured.';
+            setChannel('email', { messages: [], error: notConfigured ? 'NOT_CONFIGURED' : (d.error || 'Could not load email.') });
+            return;
+          }
+          setChannel('email', {
+            messages: (d.messages || []).map(m => ({ ...m, timestamp: Math.floor(m.date / 1000) })),
+            matched: d.matched
+          });
+        })
+        .catch(() => setChannel('email', { messages: [], error: 'Could not load email.' }));
+    }
 
     return () => { cancelled = true; };
   }, [selected, API_BASE]);
@@ -985,7 +1015,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
                 channel={ch}
                 person={selected}
                 thread={threads?.[ch]}
-                loading={loading}
+                loading={threads?.[ch]?.loading ?? false}
                 onAppend={appendThread}
                 onReplace={replaceThread}
                 API_BASE={API_BASE}
@@ -1005,7 +1035,7 @@ export default function UnifiedInbox({ clientsList, API_BASE, selectedKey, onSel
           escapeEnabled={!readerMail}
           person={selected}
           thread={threads?.[expandedChannel]}
-          loading={loading}
+          loading={threads?.[expandedChannel]?.loading ?? false}
           onAppend={appendThread}
           onReplace={replaceThread}
           API_BASE={API_BASE}
