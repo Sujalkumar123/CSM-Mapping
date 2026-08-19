@@ -212,8 +212,11 @@ function loadThread(address, limit) {
     const lock = await client.getMailboxLock(mailbox);
 
     try {
+      // "Mentions" means the address is a party to the message anywhere,
+      // not just a direct From/To match — CSMs are often looped in via Cc
+      // rather than addressed directly.
       const uids = await client.search({
-        or: [{ from: address }, { to: address }]
+        or: [{ from: address }, { to: address }, { cc: address }, { bcc: address }]
       }, { uid: true });
 
       if (uids && uids.length > 0) {
