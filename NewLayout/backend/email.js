@@ -302,7 +302,7 @@ export async function sendEmail({ to, cc, bcc, subject, body, inReplyTo, attachm
     headers['References'] = inReplyTo;
   }
 
-  const info = await transporter.sendMail({
+  const message = {
     from: creds.user,
     // Bcc-only broadcasts still need a To header; address it to the sender
     to: toList.length > 0 ? toList : creds.user,
@@ -315,7 +315,25 @@ export async function sendEmail({ to, cc, bcc, subject, body, inReplyTo, attachm
     attachments: (attachments || [])
       .filter(f => f && f.path)
       .map(f => ({ filename: f.filename, path: f.path, contentType: f.mimetype }))
-  });
+  };
+
+  let info;
+  try {
+    info = await transporter.sendMail(message);
+  } catch (err) {
+    // Render blocks outbound SMTP (ports 25/465/587) on free web services,
+    // so the connection just times out. Reading and receiving still work
+    // (IMAP is on 993), which makes this look like a puzzling partial
+    // failure unless the error says what's actually going on.
+    if (err.code === 'ETIMEDOUT' || err.code === 'ESOCKET' || /timeout/i.test(err.message || '')) {
+      throw new Error(
+        'Could not reach Gmail\'s outgoing mail server. Render blocks outbound ' +
+        'SMTP on free web services, so sending needs either a paid instance or ' +
+        'an HTTP-based email provider. Reading mail is unaffected.'
+      );
+    }
+    throw err;
+  }
 
   // Any thread we just wrote into is now stale
   for (const addr of [...toList, ...ccList, ...bccList]) {
