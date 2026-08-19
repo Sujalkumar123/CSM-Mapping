@@ -303,13 +303,19 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
     }
   };
 
-  // Seed the reply subject from the newest mail in the thread
+  // Seed the reply subject from the newest mail in the thread — but only
+  // when these messages are actually with this person. On a miss the panel
+  // falls back to showing the general inbox, and seeding from that would
+  // put a stranger's subject line on a brand-new email.
+  const emailMatched = thread?.matched !== false;
+
   useEffect(() => {
     if (channel !== 'email') return;
+    if (!emailMatched) { setSubject(''); return; }
     const last = messages[messages.length - 1];
     const s = last?.subject || '';
     setSubject(s ? (s.toLowerCase().startsWith('re:') ? s : `Re: ${s}`) : '');
-  }, [channel, messages.length]);
+  }, [channel, messages.length, emailMatched]);
 
   useEffect(() => { setInput(''); setSendError(''); }, [person.key, channel]);
 
@@ -340,7 +346,10 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
         url = `${API_BASE}/api/slack/send-single`;
         payload = { slackId: target, message: text };
       } else {
-        const lastInbound = [...messages].reverse().find(m => !m.fromMe);
+        // Same reason as the subject above: only thread the reply when the
+        // messages on screen are genuinely this person's, never when they're
+        // the fallback inbox
+        const lastInbound = emailMatched ? [...messages].reverse().find(m => !m.fromMe) : null;
         url = `${API_BASE}/api/email/send`;
         payload = { to: target, subject, body: text, inReplyTo: lastInbound?.messageId };
       }

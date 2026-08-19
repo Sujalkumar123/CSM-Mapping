@@ -246,7 +246,14 @@ function getTransport(creds) {
     secure: true,
     pool: true,
     maxConnections: 2,
-    auth: { user: creds.user, pass: creds.pass }
+    auth: { user: creds.user, pass: creds.pass },
+    // Without these, a blocked or silently-dropped outbound SMTP connection
+    // hangs the request forever: the browser's fetch eventually gives up with
+    // no response body, so the UI can only show its generic "could not be
+    // delivered" fallback and the real cause never surfaces anywhere.
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000
   });
   return transport;
 }

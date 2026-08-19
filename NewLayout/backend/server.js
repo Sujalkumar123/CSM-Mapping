@@ -856,6 +856,9 @@ app.post('/api/email/send', async (req, res) => {
     const result = await sendEmail({ to, cc, bcc, subject, body, inReplyTo, attachments });
     res.json(result);
   } catch (error) {
+    // Log it too — a send failure that only ever travels back in the HTTP
+    // response is invisible the moment the request itself doesn't complete
+    console.error('[Email] Send failed:', error.code || '', error.message);
     res.status(500).json({ error: error.message });
   }
 });
