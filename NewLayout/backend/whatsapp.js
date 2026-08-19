@@ -169,6 +169,30 @@ let rosterPhones = new Set();
 
 export function setRosterPhones(phones) {
   rosterPhones = new Set((phones || []).map(normalizePhone).filter(Boolean));
+  if (clientStatus === 'ready') warmLidMappings();
+}
+
+// Resolving a LID-addressed message back to a phone number needs that
+// contact's LID<->phone mapping on hand. Mappings only get stored as a
+// side effect of talking to someone, so a CSM who has never messaged this
+// account has none — and their first incoming message would be the one
+// that gets dropped. getLIDsForPNs() fills the gap: anything unmapped is
+// fetched from WhatsApp in one batched query and persisted (both
+// directions) by Baileys itself, so the reverse lookup is ready before
+// the first message rather than after it.
+async function warmLidMappings() {
+  const lidMapping = client?.signalRepository?.lidMapping;
+  if (!lidMapping) return;
+
+  const jids = [...rosterPhones].map(toJid);
+  if (jids.length === 0) return;
+
+  try {
+    await lidMapping.getLIDsForPNs(jids);
+    console.log(`[WhatsApp] Pre-resolved LID mappings for ${jids.length} roster number(s).`);
+  } catch (e) {
+    console.error('[WhatsApp] LID pre-resolve failed:', e.message);
+  }
 }
 
 function isRosterPhone(cleanPhone) {
@@ -436,6 +460,7 @@ async function initWhatsAppInner() {
       qrCodeData = '';
       lastInitError = '';
       console.log('✅ WhatsApp client is ready and connected!');
+      warmLidMappings();
       return;
     }
 
