@@ -3,6 +3,7 @@ import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import { convert as htmlToText } from 'html-to-text';
 import { cached, invalidate } from './cache.js';
+import { isGmailApiConfigured, sendViaGmailApi } from './gmailApi.js';
 
 const IMAP_HOST = 'imap.gmail.com';
 const SMTP_HOST = 'smtp.gmail.com';
@@ -316,6 +317,20 @@ export async function sendEmail({ to, cc, bcc, subject, body, inReplyTo, attachm
       .filter(f => f && f.path)
       .map(f => ({ filename: f.filename, path: f.path, contentType: f.mimetype }))
   };
+
+  // Prefer the Gmail HTTP API when it's set up — SMTP is unreachable from
+  // Render's free tier, and this sends as the same account either way.
+  if (isGmailApiConfigured()) {
+    const sent = await sendViaGmailApi(message);
+    for (const addr of [...toList, ...ccList, ...bccList]) {
+      invalidate(`email:${addr.toLowerCase()}`);
+    }
+    return {
+      success: true,
+      messageId: sent.id,
+      recipients: toList.length + ccList.length + bccList.length
+    };
+  }
 
   let info;
   try {
