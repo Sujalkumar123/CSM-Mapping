@@ -2,12 +2,16 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  Browsers
+  Browsers,
+  initAuthCreds,
+  BufferJSON,
+  proto
 } from 'baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
+import mongoose from 'mongoose';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,6 +24,110 @@ const __dirname = path.dirname(__filename);
 // .wwebjs_auth) — the old session format doesn't carry over, so this needs
 // one new QR scan after deploying, same as any first-time connect.
 const authDir = path.join(__dirname, '.baileys_auth');
+
+// Render's free tier wipes the local filesystem on every restart/redeploy/
+// idle spin-down, which would otherwise mean re-scanning a QR code any time
+// the instance sleeps. When MONGODB_URI is set, auth state (login session +
+// encryption keys) is persisted there instead of the local folder above; the
+// folder remains the fallback for local dev with no Mongo configured.
+let authBackend = 'file';
+let mongoReady = false;
+
+const authDocSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  json: { type: String, required: true }
+}, { collection: 'whatsapp_auth', versionKey: false });
+
+const WhatsAppAuthDoc = mongoose.models.WhatsAppAuthDoc || mongoose.model('WhatsAppAuthDoc', authDocSchema);
+
+async function connectMongo() {
+  if (mongoReady) return true;
+  const uri = process.env.MONGODB_URI;
+  if (!uri) return false;
+  try {
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(uri);
+    }
+    mongoReady = true;
+    return true;
+  } catch (e) {
+    console.error('[WhatsApp] MongoDB connection failed, falling back to local auth folder:', e.message);
+    return false;
+  }
+}
+
+// Mirrors Baileys' own useMultiFileAuthState (same BufferJSON encoding, same
+// per-key get/set/remove shape) but backed by a Mongo collection instead of
+// one file per key, so it survives a restart on Render's free tier.
+async function useMongoAuthState() {
+  const readData = async (key) => {
+    const doc = await WhatsAppAuthDoc.findById(key).lean();
+    if (!doc) return null;
+    return JSON.parse(doc.json, BufferJSON.reviver);
+  };
+  const writeData = async (key, data) => {
+    await WhatsAppAuthDoc.findByIdAndUpdate(
+      key,
+      { json: JSON.stringify(data, BufferJSON.replacer) },
+      { upsert: true }
+    );
+  };
+  const removeData = async (key) => {
+    await WhatsAppAuthDoc.findByIdAndDelete(key);
+  };
+
+  const creds = (await readData('creds')) || initAuthCreds();
+
+  return {
+    state: {
+      creds,
+      keys: {
+        get: async (type, ids) => {
+          const data = {};
+          await Promise.all(ids.map(async (id) => {
+            let value = await readData(`${type}-${id}`);
+            if (type === 'app-state-sync-key' && value) {
+              value = proto.Message.AppStateSyncKeyData.fromObject(value);
+            }
+            data[id] = value;
+          }));
+          return data;
+        },
+        set: async (data) => {
+          const tasks = [];
+          for (const category in data) {
+            for (const id in data[category]) {
+              const value = data[category][id];
+              const key = `${category}-${id}`;
+              tasks.push(value ? writeData(key, value) : removeData(key));
+            }
+          }
+          await Promise.all(tasks);
+        }
+      }
+    },
+    saveCreds: async () => writeData('creds', creds)
+  };
+}
+
+async function getAuthState() {
+  const usingMongo = await connectMongo();
+  authBackend = usingMongo ? 'mongo' : 'file';
+  if (usingMongo) {
+    console.log('[WhatsApp] Using MongoDB-backed auth store — session will survive Render restarts.');
+    return useMongoAuthState();
+  }
+  console.log('[WhatsApp] MONGODB_URI not set — using local .baileys_auth folder (session will NOT survive a Render free-tier restart).');
+  return useMultiFileAuthState(authDir);
+}
+
+async function clearAuthState() {
+  if (authBackend === 'mongo') {
+    await WhatsAppAuthDoc.deleteMany({});
+  } else {
+    await new Promise(resolve => fs.rm(authDir, { recursive: true, force: true }, () => resolve()));
+  }
+}
 
 let client = null;
 let qrCodeData = '';
@@ -207,7 +315,7 @@ export async function initWhatsApp() {
 async function initWhatsAppInner() {
   loadHistoryFromDisk();
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { state, saveCreds } = await getAuthState();
   const { version } = await fetchLatestBaileysVersion();
 
   client = makeWASocket({
@@ -275,7 +383,7 @@ async function initWhatsAppInner() {
       console.log('\n============================================================');
       console.log('  [WhatsApp Auto-Recovery] Logged out — clearing auth data and issuing a new QR.');
       console.log('============================================================\n');
-      fs.rm(authDir, { recursive: true, force: true }, () => {
+      clearAuthState().finally(() => {
         setTimeout(() => initWhatsApp(), 500);
       });
     }
@@ -414,9 +522,7 @@ export async function resetWhatsApp() {
     client = null;
   }
 
-  await new Promise(resolve => {
-    fs.rm(authDir, { recursive: true, force: true }, () => resolve());
-  });
+  await clearAuthState();
 
   await initWhatsApp();
   return { success: true };
