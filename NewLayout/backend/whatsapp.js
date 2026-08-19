@@ -13,6 +13,7 @@ import path from 'path';
 import fs from 'fs';
 import mongoose from 'mongoose';
 import { fileURLToPath } from 'url';
+import { connectMongo as connectSharedMongo } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,7 +32,6 @@ const authDir = path.join(__dirname, '.baileys_auth');
 // encryption keys) is persisted there instead of the local folder above; the
 // folder remains the fallback for local dev with no Mongo configured.
 let authBackend = 'file';
-let mongoReady = false;
 
 const authDocSchema = new mongoose.Schema({
   _id: { type: String, required: true },
@@ -41,15 +41,8 @@ const authDocSchema = new mongoose.Schema({
 const WhatsAppAuthDoc = mongoose.models.WhatsAppAuthDoc || mongoose.model('WhatsAppAuthDoc', authDocSchema);
 
 async function connectMongo() {
-  if (mongoReady) return true;
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return false;
   try {
-    if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(uri);
-    }
-    mongoReady = true;
-    return true;
+    return await connectSharedMongo();
   } catch (e) {
     console.error('[WhatsApp] MongoDB connection failed, falling back to local auth folder:', e.message);
     return false;

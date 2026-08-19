@@ -3,11 +3,11 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import XLSX from 'xlsx';
 import https from 'https';
 import multer from 'multer';
 import { initWhatsApp, getWhatsAppStatus, resetWhatsApp, sendWhatsAppMessage, sendWhatsAppMedia, fetchChatHistory, getStoredMessages, setRosterPhones, getRosterSummaries } from './whatsapp.js';
 import { getEmailStatus, verifyEmailCreds, fetchEmailThread, fetchRosterMail, sendEmail, resetEmailConnection, resetEmailTransport, setRosterEmails } from './email.js';
+import { readClients as storeReadClients, writeClients as storeWriteClients } from './clientsStore.js';
 import { cached, invalidate } from './cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -384,7 +384,7 @@ async function syncSlackIds(token) {
     }
   });
   
-  const clients = readExcelData();
+  const clients = await readExcelData();
   let updatedCount = 0;
   
   clients.forEach(c => {
@@ -420,7 +420,7 @@ async function syncSlackIds(token) {
   });
   
   if (updatedCount > 0) {
-    writeExcelData(clients);
+    await writeExcelData(clients);
   }
   
   return {
@@ -440,96 +440,6 @@ app.use('/uploads', express.static(uploadsPath));
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendBuildPath));
 
-
-// Target excel filepath (goes up to workspace root)
-const EXCEL_PATH = path.join(__dirname, '..', '..', 'csm_company_mappings (14).xlsx');
-
-const cleanColumns = [
-  "id", "legalName", "aliasBrand", "product", 
-  "csm_name_1", "csm_contact_1", "csm_email_1", 
-  "csm_name_2", "csm_email_2", "csm_contact_2", 
-  "lead_name", "lead_contact", "lead_email",
-  "csm_slack_1", "csm_slack_2"
-];
-
-let clientsCache = null;
-
-// Read and clean Excel data (with in-memory caching)
-function readExcelData(forceReload = false) {
-  if (clientsCache && !forceReload) {
-    return clientsCache;
-  }
-
-  if (!fs.existsSync(EXCEL_PATH)) {
-    clientsCache = [];
-    return clientsCache;
-  }
-
-  const workbook = XLSX.readFile(EXCEL_PATH);
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
-  
-  // Get raw JSON rows
-  const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-  if (rawRows.length === 0) {
-    clientsCache = [];
-    return clientsCache;
-  }
-
-  // Remove header row
-  const headers = rawRows[0];
-  const rows = rawRows.slice(1);
-
-  clientsCache = rows.map(row => {
-    const item = {};
-    cleanColumns.forEach((col, index) => {
-      let val = row[index];
-      if (val === undefined || val === null) {
-        val = '';
-      }
-      val = String(val).trim();
-      
-      // Clean float format like "9876543210.0"
-      if (val.replace('.', '', 1).match(/^\d+$/)) {
-        val = val.replace(/\.0+$/, '');
-      }
-
-      // Clean default placeholders
-      if (val === '0' || val === '1') {
-        val = '';
-      }
-
-      item[col] = val;
-    });
-
-    // Map to frontend nested schema structure
-    return {
-      id: item.id || '',
-      legalName: item.legalName || '',
-      product: item.product || '',
-      csm1: {
-        name: item.csm_name_1 || '',
-        email: item.csm_email_1 || '',
-        phone: item.csm_contact_1 || '',
-        slack: item.csm_slack_1 || ''
-      },
-      csm2: {
-        name: item.csm_name_2 || '',
-        email: item.csm_email_2 || '',
-        phone: item.csm_contact_2 || '',
-        slack: item.csm_slack_2 || ''
-      },
-      lead: {
-        name: item.lead_name || '',
-        email: item.lead_email || '',
-        phone: item.lead_contact || ''
-      }
-    };
-  });
-
-  syncRosters(clientsCache);
-  return clientsCache;
-}
 
 // Keep the WhatsApp/email roster whitelists in lockstep with the sheet —
 // every reload and every write re-derives them, so a removed CSM stops
@@ -557,53 +467,26 @@ function syncRosters(clients) {
   });
 }
 
-// Write React schema items back to Excel and update cache
-function writeExcelData(clients) {
-  clientsCache = clients;
-  syncRosters(clientsCache);
-  const originalHeaders = [
-    "id", "legalName", "aliasBrand", "product", 
-    "CSM Name 1", "CSM Contact", "CSM EmailId", 
-    "CSM Name 2", "CSM EmailID", "CSM Contact", 
-    "leadName", "leadName Contact", "lead EmailID",
-    "CSM Slack ID", "CSM 2 Slack ID"
-  ];
+// Client/CSM directory storage now lives in clientsStore.js (MongoDB when
+// configured, xlsx as local-dev fallback) — these stay as thin wrappers so
+// every call site below is unchanged apart from adding await.
+async function readExcelData(forceReload = false) {
+  const clients = await storeReadClients(forceReload);
+  syncRosters(clients);
+  return clients;
+}
 
-  const sheetData = [originalHeaders];
-
-  clients.forEach(c => {
-    const row = [
-      c.id || '',
-      c.legalName || '',
-      '', // aliasBrand
-      c.product || '',
-      c.csm1?.name || '',
-      c.csm1?.phone || '',
-      c.csm1?.email || '',
-      c.csm2?.name || '',
-      c.csm2?.email || '',
-      c.csm2?.phone || '',
-      c.lead?.name || '',
-      c.lead?.phone || '',
-      c.lead?.email || '',
-      c.csm1?.slack || '',
-      c.csm2?.slack || ''
-    ];
-    sheetData.push(row);
-  });
-
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Mappings');
-  XLSX.writeFile(workbook, EXCEL_PATH);
+async function writeExcelData(clients) {
+  await storeWriteClients(clients);
+  syncRosters(clients);
 }
 
 // ─── APIs ───
 
 // 1. Get all mappings
-app.get('/api/clients', (req, res) => {
+app.get('/api/clients', async (req, res) => {
   try {
-    const data = readExcelData();
+    const data = await readExcelData();
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -611,11 +494,11 @@ app.get('/api/clients', (req, res) => {
 });
 
 // 2. Add assignment
-app.post('/api/clients', (req, res) => {
+app.post('/api/clients', async (req, res) => {
   try {
     const newClient = req.body;
-    const currentList = readExcelData();
-    
+    const currentList = await readExcelData();
+
     // Auto increment ID if not present
     if (!newClient.id) {
       const ids = currentList.map(c => parseInt(c.id)).filter(id => !isNaN(id));
@@ -624,7 +507,7 @@ app.post('/api/clients', (req, res) => {
     }
 
     currentList.push(newClient);
-    writeExcelData(currentList);
+    await writeExcelData(currentList);
     res.status(201).json(newClient);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -632,19 +515,19 @@ app.post('/api/clients', (req, res) => {
 });
 
 // 3. Update assignment
-app.put('/api/clients/:id', (req, res) => {
+app.put('/api/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updatedClient = req.body;
-    let currentList = readExcelData();
-    
+    let currentList = await readExcelData();
+
     let index = currentList.findIndex(c => c.id === id);
     if (index === -1) {
       return res.status(404).json({ error: 'Record not found' });
     }
 
     currentList[index] = { ...currentList[index], ...updatedClient };
-    writeExcelData(currentList);
+    await writeExcelData(currentList);
     res.json(currentList[index]);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -652,18 +535,18 @@ app.put('/api/clients/:id', (req, res) => {
 });
 
 // 4. Delete assignment
-app.delete('/api/clients/:id', (req, res) => {
+app.delete('/api/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    let currentList = readExcelData();
-    
+    let currentList = await readExcelData();
+
     let index = currentList.findIndex(c => c.id === id);
     if (index === -1) {
       return res.status(404).json({ error: 'Record not found' });
     }
 
     currentList.splice(index, 1);
-    writeExcelData(currentList);
+    await writeExcelData(currentList);
     res.json({ success: true, message: `Record ${id} removed` });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1160,12 +1043,12 @@ app.get('*', (req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Backend server running on port ${PORT}`);
   // Warm up clients data cache immediately on server start
-  const initialData = readExcelData(true);
+  const initialData = await readExcelData(true);
   console.log(`Cached ${initialData.length} client records in memory.`);
-  
+
   // Defer heavy WhatsApp background initialization so Express handles incoming HTTP requests immediately
   setTimeout(() => {
     initWhatsApp();
