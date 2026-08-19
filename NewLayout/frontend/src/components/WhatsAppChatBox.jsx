@@ -108,9 +108,9 @@ export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect, fi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, message: text })
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const errMsg = errData.error || 'Failed to deliver message';
+        const errMsg = data.error || 'Failed to deliver message';
         // Remove optimistic bubble and restore text
         setMessages(prev => prev.filter(m => m.id !== optimistic.id));
         setInput(text);
@@ -120,6 +120,14 @@ export default function WhatsAppChatBox({ person, API_BASE, onRequestConnect, fi
           alert(`Message delivery failed: ${errMsg}`);
         }
         return;
+      }
+      // Adopt the real Baileys id/timestamp so pollMessages recognizes the
+      // echoed copy as this same message instead of appending it again.
+      if (data.id) {
+        setMessages(prev => prev.map(m => m.id === optimistic.id
+          ? { ...m, id: data.id, timestamp: data.timestamp || m.timestamp }
+          : m
+        ));
       }
     } catch (e) {
       console.error('Send failed:', e);

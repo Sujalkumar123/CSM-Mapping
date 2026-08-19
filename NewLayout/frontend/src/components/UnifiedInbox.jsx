@@ -357,7 +357,13 @@ function ChannelPanel({ channel, person, thread, loading, onAppend, onReplace, A
         setInput(text);
         setSendError(data.error || 'Message could not be delivered.');
       } else {
-        onReplace(channel, prev => prev.map(m => m.id === tempId ? { ...m, pending: false } : m));
+        // For WhatsApp, the backend returns the real Baileys message id/
+        // timestamp — adopt it so the 5s poll below recognizes this as the
+        // same message (by id) instead of appending it a second time.
+        onReplace(channel, prev => prev.map(m => m.id === tempId
+          ? { ...m, id: data.id || m.id, timestamp: data.timestamp || m.timestamp, pending: false }
+          : m
+        ));
       }
     } catch (e) {
       onReplace(channel, prev => prev.filter(m => m.id !== tempId));

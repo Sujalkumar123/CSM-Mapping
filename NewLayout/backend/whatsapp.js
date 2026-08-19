@@ -422,9 +422,10 @@ async function initWhatsAppInner() {
       if (!phone || !isRosterPhone(phone)) continue;
 
       const body = extractMessageText(m);
+      if (!body) continue; // non-text protocol/system events (reactions, receipts, etc.)
       const fromMe = !!m.key.fromMe;
 
-      console.log(`[WhatsApp] Message event: ${fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${body || '(media)'}"`);
+      console.log(`[WhatsApp] Message event: ${fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${body}"`);
 
       const added = recordMessage(phone, {
         id: m.key.id,
@@ -455,8 +456,20 @@ export async function sendWhatsAppMessage(phone, text) {
     throw new Error('This number is not on the CSM roster.');
   }
 
-  await client.sendMessage(toJid(cleanPhone), { text });
-  return { success: true };
+  const sent = await client.sendMessage(toJid(cleanPhone), { text });
+  const id = sent?.key?.id || `local-${Date.now()}`;
+  const timestamp = toUnixSeconds(sent?.messageTimestamp);
+
+  // Record immediately with the real Baileys id, instead of waiting for the
+  // messages.upsert echo — the dashboard's own optimistic bubble otherwise
+  // has no way to recognize the echoed copy as the same message and ends up
+  // showing both. messages.upsert's own recordMessage() dedupes by id, so
+  // if the echo does arrive later it's a no-op, not a second entry.
+  if (recordMessage(cleanPhone, { id, body: text, fromMe: true, timestamp, type: 'chat' })) {
+    saveHistoryToDisk();
+  }
+
+  return { success: true, id, timestamp };
 }
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp)$/i;
