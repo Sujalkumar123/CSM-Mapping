@@ -202,6 +202,28 @@ function toJid(cleanPhone) {
   return `${cleanPhone}@s.whatsapp.net`;
 }
 
+// WhatsApp is migrating to LID ("linked identity") addressing: an incoming
+// message's remoteJid can be '<lid>@lid' rather than '<phone>@s.whatsapp.net'.
+// The digits in a LID are an internal identity number, NOT a phone number, so
+// running them through the roster check silently drops every message from a
+// LID-addressed contact. The phone-number JID usually rides along on the key
+// as remoteJidAlt; when it doesn't, Baileys' own LID->PN store can resolve it.
+async function resolvePhoneFromKey(key) {
+  const jid = key?.remoteJid;
+  if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return '';
+  if (!jid.endsWith('@lid')) return getCleanPhoneFromJid(jid);
+
+  if (key.remoteJidAlt) return getCleanPhoneFromJid(key.remoteJidAlt);
+
+  try {
+    const pn = await client?.signalRepository?.lidMapping?.getPNForLID(jid);
+    if (pn) return getCleanPhoneFromJid(pn);
+  } catch (e) {
+    console.error('[WhatsApp] LID->phone lookup failed:', e.message);
+  }
+  return '';
+}
+
 // messageTimestamp can arrive as a plain number or a protobuf Long — this
 // normalizes either into a plain unix-seconds number safely.
 function toUnixSeconds(ts) {
@@ -457,7 +479,7 @@ async function initWhatsAppInner() {
     for (const m of messages || []) {
       const jid = m.key?.remoteJid;
       if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
-      const phone = getCleanPhoneFromJid(jid);
+      const phone = await resolvePhoneFromKey(m.key);
       if (!phone || !isRosterPhone(phone)) continue;
 
       const body = extractMessageText(m);
@@ -485,12 +507,20 @@ async function initWhatsAppInner() {
     for (const m of messages || []) {
       const jid = m.key?.remoteJid;
       if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
-      const phone = getCleanPhoneFromJid(jid);
-      if (!phone || !isRosterPhone(phone)) continue;
 
+      const phone = await resolvePhoneFromKey(m.key);
       const body = extractMessageText(m);
-      if (!body) continue; // non-text protocol/system events (reactions, receipts, etc.)
       const fromMe = !!m.key.fromMe;
+
+      // A message that reaches us but matches no roster number used to be
+      // dropped in silence, which made "nothing arrived" indistinguishable
+      // from "arrived and was filtered" — log it so the next one is visible.
+      if (!phone || !isRosterPhone(phone)) {
+        console.log(`[WhatsApp] Ignored message from non-roster contact — jid=${jid} alt=${m.key.remoteJidAlt || 'none'} resolved=${phone || 'none'} body="${body || '(no text)'}"`);
+        continue;
+      }
+
+      if (!body) continue; // non-text protocol/system events (reactions, receipts, etc.)
 
       console.log(`[WhatsApp] Message event: ${fromMe ? '📤 Outgoing to' : '📥 Incoming from'} ${phone}: "${body}"`);
 
