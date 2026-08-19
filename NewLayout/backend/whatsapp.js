@@ -212,16 +212,21 @@ function toUnixSeconds(ts) {
 }
 
 // Baileys nests message content by type instead of a flat .body string —
-// this covers the shapes a CSM conversation will actually produce.
+// this covers the shapes a CSM conversation will actually produce. Media
+// sent without a caption has no text at all, so without a placeholder it
+// would look like it never arrived (and messages.upsert already drops
+// anything with an empty body) — a labeled placeholder keeps it visible.
 function extractMessageText(m) {
   const c = m?.message;
   if (!c) return '';
-  return c.conversation
-    || c.extendedTextMessage?.text
-    || c.imageMessage?.caption
-    || c.videoMessage?.caption
-    || c.documentMessage?.caption
-    || '';
+  if (c.conversation) return c.conversation;
+  if (c.extendedTextMessage?.text) return c.extendedTextMessage.text;
+  if (c.imageMessage) return c.imageMessage.caption || 'Image received';
+  if (c.videoMessage) return c.videoMessage.caption || 'Video received';
+  if (c.documentMessage) return c.documentMessage.caption || `Document received: ${c.documentMessage.fileName || 'file'}`;
+  if (c.audioMessage) return c.audioMessage.ptt ? 'Voice message received' : 'Audio received';
+  if (c.stickerMessage) return 'Sticker received';
+  return '';
 }
 
 // Load history (retaining only the last RETENTION_SECONDS of messages, and
