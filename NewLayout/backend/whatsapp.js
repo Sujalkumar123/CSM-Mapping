@@ -40,6 +40,20 @@ const authDocSchema = new mongoose.Schema({
 
 const WhatsAppAuthDoc = mongoose.models.WhatsAppAuthDoc || mongoose.model('WhatsAppAuthDoc', authDocSchema);
 
+// Same ephemeral-disk exposure as the auth store above, just for message
+// content instead of login state: chat_history.json and the in-memory
+// messageStore both live only on local disk otherwise, so a restart wipes
+// any message not yet re-synced from WhatsApp's own history. One document
+// per phone number, mirroring messageStore's own shape.
+let historyBackend = 'file';
+
+const messageHistoryDocSchema = new mongoose.Schema({
+  _id: { type: String, required: true }, // phone
+  messages: { type: Array, default: [] }
+}, { collection: 'whatsapp_messages', versionKey: false });
+
+const WhatsAppMessageDoc = mongoose.models.WhatsAppMessageDoc || mongoose.model('WhatsAppMessageDoc', messageHistoryDocSchema);
+
 async function connectMongo() {
   try {
     return await connectSharedMongo();
@@ -210,48 +224,96 @@ function extractMessageText(m) {
     || '';
 }
 
-// Load history from local JSON file (retaining only the last RETENTION_SECONDS
-// of messages, and only for numbers still on the CSM roster — older captures
-// made before roster-scoping existed can otherwise leak group chats /
-// notification IDs back into memory on every restart)
-function loadHistoryFromDisk() {
+// Load history (retaining only the last RETENTION_SECONDS of messages, and
+// only for numbers still on the CSM roster — older captures made before
+// roster-scoping existed can otherwise leak group chats / notification IDs
+// back into memory on every restart). MongoDB when configured; the local
+// JSON file otherwise, for local dev with no Mongo set up.
+async function loadHistoryFromDisk() {
+  const usingMongo = await connectMongo().catch(() => false);
+  historyBackend = usingMongo ? 'mongo' : 'file';
+
+  const now = Math.floor(Date.now() / 1000);
+  const limit = now - RETENTION_SECONDS;
+  let dropped = 0;
+
+  if (usingMongo) {
+    try {
+      const docs = await WhatsAppMessageDoc.find({}).lean();
+      docs.forEach(doc => {
+        const phone = doc._id;
+        if (!isRosterPhone(phone)) { dropped++; return; }
+        messageStore[phone] = (doc.messages || []).filter(msg => msg.timestamp >= limit);
+      });
+      if (dropped > 0) {
+        console.log(`Dropped ${dropped} cached thread(s) no longer on the CSM roster.`);
+        await saveHistoryToDisk();
+      }
+      console.log(`Loaded ${RETENTION_SECONDS / 86400}-day chat history cache from MongoDB.`);
+    } catch (e) {
+      console.error('Error loading history cache from MongoDB:', e.message);
+    }
+    return;
+  }
+
   try {
     if (fs.existsSync(chatHistoryPath)) {
       const data = JSON.parse(fs.readFileSync(chatHistoryPath, 'utf8'));
-      const now = Math.floor(Date.now() / 1000);
-      const limit = now - RETENTION_SECONDS;
-      let dropped = 0;
-
       Object.keys(data).forEach(phone => {
         if (!isRosterPhone(phone)) { dropped++; return; }
         messageStore[phone] = (data[phone] || []).filter(msg => msg.timestamp >= limit);
       });
       if (dropped > 0) {
         console.log(`Dropped ${dropped} cached thread(s) no longer on the CSM roster.`);
-        saveHistoryToDisk();
+        await saveHistoryToDisk();
       }
-      console.log('Loaded 5-day chat history cache from disk.');
+      console.log(`Loaded ${RETENTION_SECONDS / 86400}-day chat history cache from disk.`);
     }
   } catch (e) {
     console.error('Error loading history cache:', e.message);
   }
 }
 
-// Write history to local JSON file (filtering to keep only the retention window)
-function saveHistoryToDisk() {
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const limit = now - RETENTION_SECONDS;
+// Write history (filtering to keep only the retention window). Persists
+// every roster phone's thread, not just the one that just changed — cheap
+// at this scale (a roster's worth of threads, not thousands) and keeps the
+// same "always a consistent full snapshot" behavior the file version had.
+async function saveHistoryToDisk() {
+  const now = Math.floor(Date.now() / 1000);
+  const limit = now - RETENTION_SECONDS;
 
-    const dataToSave = {};
-    Object.keys(messageStore).forEach(phone => {
-      const filtered = messageStore[phone].filter(msg => msg.timestamp >= limit);
-      if (filtered.length > 0) {
-        dataToSave[phone] = filtered;
+  const dataToSave = {};
+  Object.keys(messageStore).forEach(phone => {
+    const filtered = messageStore[phone].filter(msg => msg.timestamp >= limit);
+    if (filtered.length > 0) {
+      dataToSave[phone] = filtered;
+    }
+    messageStore[phone] = filtered; // Clean memory map
+  });
+
+  if (historyBackend === 'mongo') {
+    try {
+      const keepPhones = Object.keys(dataToSave);
+      const ops = keepPhones.map(phone => ({
+        replaceOne: {
+          filter: { _id: phone },
+          replacement: { _id: phone, messages: dataToSave[phone] },
+          upsert: true
+        }
+      }));
+      if (ops.length > 0) await WhatsAppMessageDoc.bulkWrite(ops);
+      // Guard against an empty in-memory store (e.g. this ran before the
+      // initial load populated it) wiping every doc via an unbounded $nin
+      if (keepPhones.length > 0) {
+        await WhatsAppMessageDoc.deleteMany({ _id: { $nin: keepPhones } });
       }
-      messageStore[phone] = filtered; // Clean memory map
-    });
+    } catch (e) {
+      console.error('Error saving history cache to MongoDB:', e.message);
+    }
+    return;
+  }
 
+  try {
     fs.writeFileSync(chatHistoryPath, JSON.stringify(dataToSave, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving history cache:', e.message);
@@ -306,7 +368,7 @@ export async function initWhatsApp() {
 }
 
 async function initWhatsAppInner() {
-  loadHistoryFromDisk();
+  await loadHistoryFromDisk();
 
   const { state, saveCreds } = await getAuthState();
   const { version } = await fetchLatestBaileysVersion();
@@ -385,7 +447,7 @@ async function initWhatsAppInner() {
   // First-connect history push — real prior WhatsApp conversation history,
   // not just messages sent through the dashboard. Baileys delivers this as
   // one bulk event rather than an on-demand per-chat fetch.
-  client.ev.on('messaging-history.set', ({ messages }) => {
+  client.ev.on('messaging-history.set', async ({ messages }) => {
     let added = 0;
     for (const m of messages || []) {
       const jid = m.key?.remoteJid;
@@ -407,14 +469,14 @@ async function initWhatsAppInner() {
     }
     if (added > 0) {
       console.log(`[WhatsApp] Synced ${added} historical message(s) for CSM roster contacts.`);
-      saveHistoryToDisk();
+      await saveHistoryToDisk();
     }
   });
 
   // Capture messages for CSM roster contacts only — this account is your
   // real WhatsApp, but the dashboard should only ever remember chats with
   // the people you've named, not every personal conversation on your phone
-  client.ev.on('messages.upsert', ({ messages }) => {
+  client.ev.on('messages.upsert', async ({ messages }) => {
     for (const m of messages || []) {
       const jid = m.key?.remoteJid;
       if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
@@ -434,7 +496,7 @@ async function initWhatsAppInner() {
         timestamp: toUnixSeconds(m.messageTimestamp),
         type: 'chat'
       });
-      if (added) saveHistoryToDisk();
+      if (added) await saveHistoryToDisk();
     }
   });
 }
@@ -466,7 +528,7 @@ export async function sendWhatsAppMessage(phone, text) {
   // showing both. messages.upsert's own recordMessage() dedupes by id, so
   // if the echo does arrive later it's a no-op, not a second entry.
   if (recordMessage(cleanPhone, { id, body: text, fromMe: true, timestamp, type: 'chat' })) {
-    saveHistoryToDisk();
+    await saveHistoryToDisk();
   }
 
   return { success: true, id, timestamp };
