@@ -11,6 +11,10 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
   const [csm1Phone, setCsm1Phone] = useState('');
   const [csm1Email, setCsm1Email] = useState('');
   const [csm1Slack, setCsm1Slack] = useState('');
+  // Which tier (L1 Support / CSE / Senior CSE / Customer Success Manager)
+  // actually filled the Primary slot — not user-editable here, just carried
+  // through unchanged on edit so saving other fields doesn't erase the tag.
+  const [csm1Role, setCsm1Role] = useState('');
   const [phoneBlank, setPhoneBlank] = useState(false);
   const [emailBlank, setEmailBlank] = useState(false);
 
@@ -20,10 +24,11 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
   const [csm2Email, setCsm2Email] = useState('');
   const [csm2Slack, setCsm2Slack] = useState('');
 
-  // Account Lead
+  // VP (the "Account Lead" slot)
   const [leadName, setLeadName] = useState('');
   const [leadPhone, setLeadPhone] = useState('');
   const [leadEmail, setLeadEmail] = useState('');
+  const [leadSlack, setLeadSlack] = useState('');
 
   // Autocomplete suggestion states
   const [csm1Suggestions, setCsm1Suggestions] = useState([]);
@@ -198,6 +203,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
     setLeadName(s.name);
     if (s.email) setLeadEmail(s.email);
     if (s.phone) setLeadPhone(s.phone);
+    if (s.slack) setLeadSlack(s.slack);
     setShowLeadSuggestions(false);
   };
 
@@ -212,6 +218,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
         setCsm1Phone(editingClient.csm1?.phone || '');
         setCsm1Email(editingClient.csm1?.email || '');
         setCsm1Slack(editingClient.csm1?.slack || '');
+        setCsm1Role(editingClient.csm1?.role || '');
         setPhoneBlank(!editingClient.csm1?.phone);
         setEmailBlank(!editingClient.csm1?.email);
 
@@ -223,6 +230,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
         setLeadName(editingClient.lead?.name || '');
         setLeadPhone(editingClient.lead?.phone || '');
         setLeadEmail(editingClient.lead?.email || '');
+        setLeadSlack(editingClient.lead?.slack || '');
       } else {
         // Reset form for "Add" mode
         setLegalName('');
@@ -232,6 +240,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
         setCsm1Phone('');
         setCsm1Email('');
         setCsm1Slack('');
+        setCsm1Role('');
         setPhoneBlank(false);
         setEmailBlank(false);
 
@@ -243,6 +252,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
         setLeadName('');
         setLeadPhone('');
         setLeadEmail('');
+        setLeadSlack('');
       }
     }
   }, [isOpen, editingClient]);
@@ -268,7 +278,8 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
         name: csm1Name.trim(),
         phone: phoneBlank ? '' : csm1Phone.trim(),
         email: emailBlank ? '' : csm1Email.trim(),
-        slack: csm1Slack.trim()
+        slack: csm1Slack.trim(),
+        role: csm1Role
       },
       csm2: {
         name: csm2Name.trim(),
@@ -279,7 +290,8 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
       lead: {
         name: leadName.trim(),
         phone: leadPhone.trim(),
-        email: leadEmail.trim()
+        email: leadEmail.trim(),
+        slack: leadSlack.trim()
       }
     };
 
@@ -475,7 +487,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
 
           {/* Section: Secondary CSM */}
           <div className="form-section">
-            <div className="section-title">Secondary CSM (optional)</div>
+            <div className="section-title">AVP - Customer Success (optional)</div>
             <div className="form-row">
               <div className="form-field" style={{ position: 'relative' }}>
                 <label>Name</label>
@@ -597,7 +609,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
 
           {/* Section: Account Lead */}
           <div className="form-section">
-            <div className="section-title">Account lead (optional)</div>
+            <div className="section-title">VP - Customer Success (optional)</div>
             <div className="form-row">
               <div className="form-field" style={{ position: 'relative' }}>
                 <label>Name</label>
@@ -682,7 +694,7 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
                 />
               </div>
             </div>
-            <div className="form-row single">
+            <div className="form-row">
               <div className="form-field" style={{ position: 'relative' }}>
                 <label>Email</label>
                 <input
@@ -705,6 +717,15 @@ export default function AddCsmModal({ isOpen, onClose, onSave, editingClient, ro
                   autoComplete="off"
                 />
                 {renderEmailDropdown(leadEmailSuggestions, selectLeadSuggestion, showLeadEmailSuggestions)}
+              </div>
+              <div className="form-field">
+                <label>Slack member ID</label>
+                <input
+                  type="text"
+                  placeholder="U05AB12CD"
+                  value={leadSlack}
+                  onChange={e => setLeadSlack(e.target.value)}
+                />
               </div>
             </div>
           </div>

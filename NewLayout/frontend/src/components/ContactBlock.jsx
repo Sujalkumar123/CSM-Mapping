@@ -49,15 +49,13 @@ export default function ContactBlock({ roleLabel, person, kind }) {
           <span className="action-btn disabled"><IconCompose /> Compose</span>
         )}
 
-        {kind !== 'lead' && (
-          person.slack ? (
-            <a className="action-btn slack"
-               href={`slack://user?team=T041B4BGT&id=${person.slack}`}>
-              <IconSlack /> Slack
-            </a>
-          ) : (
-            <span className="action-btn disabled"><IconSlack /> Slack</span>
-          )
+        {person.slack ? (
+          <a className="action-btn slack"
+             href={`slack://user?team=T041B4BGT&id=${person.slack}`}>
+            <IconSlack /> Slack
+          </a>
+        ) : (
+          <span className="action-btn disabled"><IconSlack /> Slack</span>
         )}
 
         {wa ? (

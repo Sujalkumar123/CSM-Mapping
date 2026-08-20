@@ -28,13 +28,18 @@ const personSchema = new mongoose.Schema({
   name: { type: String, default: '' },
   email: { type: String, default: '' },
   phone: { type: String, default: '' },
-  slack: { type: String, default: '' }
+  slack: { type: String, default: '' },
+  // Only meaningful on csm1: which tier (L1 Support / Customer Success
+  // Executive / Senior CSE / Customer Success Manager) actually filled the
+  // "primary" slot, since it cascades through whichever one has a name.
+  role: { type: String, default: '' }
 }, { _id: false });
 
 const leadSchema = new mongoose.Schema({
   name: { type: String, default: '' },
   email: { type: String, default: '' },
-  phone: { type: String, default: '' }
+  phone: { type: String, default: '' },
+  slack: { type: String, default: '' }
 }, { _id: false });
 
 // The sheet's own "id" column is NOT a reliable unique key — 80 distinct
@@ -65,14 +70,16 @@ function docToClient(doc) {
     product: doc.product || '',
     csm1: {
       name: doc.csm1?.name || '', email: doc.csm1?.email || '',
-      phone: doc.csm1?.phone || '', slack: doc.csm1?.slack || ''
+      phone: doc.csm1?.phone || '', slack: doc.csm1?.slack || '',
+      role: doc.csm1?.role || ''
     },
     csm2: {
       name: doc.csm2?.name || '', email: doc.csm2?.email || '',
       phone: doc.csm2?.phone || '', slack: doc.csm2?.slack || ''
     },
     lead: {
-      name: doc.lead?.name || '', email: doc.lead?.email || '', phone: doc.lead?.phone || ''
+      name: doc.lead?.name || '', email: doc.lead?.email || '',
+      phone: doc.lead?.phone || '', slack: doc.lead?.slack || ''
     }
   };
 }

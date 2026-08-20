@@ -25,13 +25,16 @@ export function buildPeople(clientsList) {
         }
         existing.clientCount++;
       } else {
+        const role = i === 2 ? 'VP - Customer Success'
+          : i === 1 ? 'AVP - Customer Success'
+          : (p.role || 'CSM');
         byKey.set(key, {
           key,
           name: p.name,
           email: p.email || '',
           phone: p.phone || '',
           slack: p.slack || '',
-          role: i === 2 ? 'Account lead' : 'CSM',
+          role,
           companies: [c.legalName],
           clientCount: 1,
           search: `${p.name} ${p.email || ''}`.toLowerCase()

@@ -457,6 +457,7 @@ function syncRosters(clients) {
     if (c.lead?.email) emails.push(c.lead.email);
     if (c.csm1?.slack) slackIds.add(c.csm1.slack);
     if (c.csm2?.slack) slackIds.add(c.csm2.slack);
+    if (c.lead?.slack) slackIds.add(c.lead.slack);
   });
   setRosterPhones(phones);
   setRosterEmails(emails);

@@ -202,8 +202,13 @@ a{color:inherit;text-decoration:none;}
 .id-badge{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-faint);background:var(--surface);border:1px solid var(--line);padding:2.5px 8px;border-radius:7px;}
 .product-pill{font-size:11.5px;font-weight:600;color:var(--cobalt-ink);background:var(--cobalt-soft);padding:6px 12px;border-radius:20px;}
 
-.contact-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:14px;background:var(--surface-2);}
+/* Primary CSM / AVP / VP side by side, scrolling right when the row is
+   wider than the card — the client cards used to have exactly 3 roles that
+   always fit a 3-column grid, but AVP and VP are new roles alongside
+   Primary, so a fixed grid would squeeze rather than reveal them. */
+.contact-grid{display:flex;gap:12px;padding:14px;background:var(--surface-2);overflow-x:auto;scroll-snap-type:x proximity;}
 .contact{
+  flex:0 0 240px;scroll-snap-align:start;
   padding:18px 18px 17px;position:relative;border-radius:15px;
   background:var(--surface);border:1px solid var(--line);
   box-shadow:0 1px 2px rgba(15,17,25,.03);
@@ -363,9 +368,8 @@ a{color:inherit;text-decoration:none;}
   .sidebar{position:relative;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;}
   .filters,.legend,.sidebar-actions,.nav-group{flex:1 1 200px;}
   .kpi-strip{grid-template-columns:repeat(2,1fr);}
-  .contact-grid{grid-template-columns:1fr;}
-  .contact{border-left:none;border-top:1px solid var(--line);}
-  .contact:first-child{border-top:none;}
+  /* contact-grid stays a horizontally-scrolling row at every width now —
+     narrow screens just get a shorter first glimpse before swiping right */
   .roster-grid{grid-template-columns:repeat(2,1fr);}
   .bulk-shell{grid-template-columns:1fr;}
 }

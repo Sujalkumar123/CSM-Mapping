@@ -13,12 +13,12 @@ export default function ClientCard({ client }) {
       </div>
       <div className="contact-grid">
         <ContactBlock
-          roleLabel="Primary CSM"
+          roleLabel={c.csm1?.role || 'Primary CSM'}
           person={c.csm1?.name ? c.csm1 : { name: 'Unassigned' }}
           kind="primary"
         />
-        <ContactBlock roleLabel="Secondary CSM" person={c.csm2} kind="secondary" />
-        <ContactBlock roleLabel="Account lead" person={c.lead} kind="lead" />
+        <ContactBlock roleLabel="AVP - Customer Success" person={c.csm2} kind="secondary" />
+        <ContactBlock roleLabel="VP - Customer Success" person={c.lead} kind="lead" />
       </div>
     </div>
   );
