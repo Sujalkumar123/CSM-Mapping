@@ -202,17 +202,19 @@ a{color:inherit;text-decoration:none;}
 .id-badge{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-faint);background:var(--surface);border:1px solid var(--line);padding:2.5px 8px;border-radius:7px;}
 .product-pill{font-size:11.5px;font-weight:600;color:var(--cobalt-ink);background:var(--cobalt-soft);padding:6px 12px;border-radius:20px;}
 
-/* Primary CSM shows full-width by default, exactly like the card looked
-   before AVP/VP existed — each block takes the whole row, so scrolling
-   right pages to AVP, then VP, instead of squeezing all three into view
-   at once. min-width:0 is required here and on .card above: a flex/grid
-   item defaults to min-width:auto, meaning it won't shrink below its
-   content's natural size — without overriding that, the browser was
-   widening the whole card (and the page along with it) to fit all three
-   blocks rather than clipping and scrolling within contact-grid. */
-.contact-grid{display:flex;min-width:0;gap:12px;padding:14px;background:var(--surface-2);overflow-x:auto;scroll-snap-type:x mandatory;}
+/* Same 3-box-wide look as the original Primary/Secondary/Lead layout —
+   at a normal card width, Primary/AVP/VP all sit side by side with room
+   to spare, same as before. Scrolling only kicks in on a narrower card
+   (a smaller window, or a phone), which is when it's actually needed to
+   reach AVP/VP. min-width:0 is required here and on .card above: a
+   flex/grid item defaults to min-width:auto, meaning it won't shrink
+   below its content's natural size — without overriding that, the
+   browser was widening the whole card (and the page along with it) to
+   fit all three blocks rather than clipping and scrolling within
+   contact-grid. */
+.contact-grid{display:flex;min-width:0;gap:12px;padding:14px;background:var(--surface-2);overflow-x:auto;scroll-snap-type:x proximity;}
 .contact{
-  flex:0 0 100%;min-width:0;scroll-snap-align:start;
+  flex:0 0 240px;min-width:0;scroll-snap-align:start;
   padding:18px 18px 17px;position:relative;border-radius:15px;
   background:var(--surface);border:1px solid var(--line);
   box-shadow:0 1px 2px rgba(15,17,25,.03);
