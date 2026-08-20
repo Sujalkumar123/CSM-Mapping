@@ -5,7 +5,13 @@ export default function RosterCard({ person, clientsList = [] }) {
   const p = person;
   const ini = getInitials(p.name);
   const wa = getWhatsAppLink(p.phone);
-  const load = clientsList.filter(c => c.csm1?.name === p.name || c.csm2?.name === p.name).length;
+  // Match by identity (email/phone), not the exact name string — the same
+  // person can be spelled differently across rows in the source sheet, and
+  // an exact-name match would undercount their actual client load.
+  const key = (p.email || p.phone || p.name || '').toLowerCase().trim();
+  const load = clientsList.filter(c => [c.csm1, c.csm2].some(
+    x => x?.name && (x.email || x.phone || x.name).toLowerCase().trim() === key
+  )).length;
 
   return (
     <div className="roster-card">

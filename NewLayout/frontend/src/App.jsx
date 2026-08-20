@@ -105,14 +105,26 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // The source sheet has the same person spelled multiple ways across rows
+  // — typos and inconsistent capitalization ("Suvarna Choudhary" /
+  // "Suvarna Chaudhary" / "Suvarna chaudhary" is one real example, found
+  // in 12 of the 80 CSMs). Grouping by raw name string shows each spelling
+  // as its own separate CSM, so every place that needs "is this the same
+  // person" — the directory, the filter dropdown, and the filter itself —
+  // uses this same email/phone-first key instead.
+  const csmIdentityKey = (p) => (p?.email || p?.phone || p?.name || '').toLowerCase().trim();
+
   // Recalculate unique CSM names from live data
   const getLiveCsmNames = () => {
-    const names = new Set();
+    const byKey = new Map();
     clientsList.forEach(c => {
-      if (c.csm1?.name) names.add(c.csm1.name);
-      if (c.csm2?.name) names.add(c.csm2.name);
+      [c.csm1, c.csm2].forEach(p => {
+        if (!p || !p.name) return;
+        const key = csmIdentityKey(p);
+        if (!byKey.has(key)) byKey.set(key, p.name);
+      });
     });
-    return [...names].sort();
+    return [...byKey.values()].sort();
   };
 
   // Recalculate unique Products from live data
@@ -122,19 +134,46 @@ export default function App() {
 
   // Recalculate CSM roster / stats from live data
   const getLiveCsmDirectory = () => {
-    const dir = {};
+    const dir = new Map();
     clientsList.forEach(c => {
       [c.csm1, c.csm2].forEach(p => {
-        if (p && p.name) {
-          if (!dir[p.name] || (!dir[p.name].email && p.email)) {
-            dir[p.name] = { ...p };
-          }
+        if (!p || !p.name) return;
+        const key = csmIdentityKey(p);
+        const existing = dir.get(key);
+        if (!existing) {
+          dir.set(key, { ...p });
+        } else {
+          if (!existing.email && p.email) existing.email = p.email;
+          if (!existing.phone && p.phone) existing.phone = p.phone;
+          if (!existing.slack && p.slack) existing.slack = p.slack;
         }
       });
     });
-    return Object.entries(dir)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, info]) => ({ name, ...info }));
+    return [...dir.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  // The CSM filter dropdown offers one canonical spelling per person (from
+  // getLiveCsmNames above) — this resolves it back to that person's full
+  // set of name spellings, so selecting it doesn't miss rows that use a
+  // different spelling of the same email/phone identity.
+  const getNamesForCsmFilter = (selectedName) => {
+    if (selectedName === 'All CSMs') return null;
+    const targetKey = (() => {
+      for (const c of clientsList) {
+        for (const p of [c.csm1, c.csm2]) {
+          if (p?.name === selectedName) return csmIdentityKey(p);
+        }
+      }
+      return null;
+    })();
+    if (!targetKey) return new Set([selectedName]);
+    const names = new Set();
+    clientsList.forEach(c => {
+      [c.csm1, c.csm2].forEach(p => {
+        if (p?.name && csmIdentityKey(p) === targetKey) names.add(p.name);
+      });
+    });
+    return names;
   };
 
   // Filter clients
@@ -145,9 +184,11 @@ export default function App() {
     if (kpi === 'phone') list = list.filter(c => c.csm1?.name && !c.csm1.phone);
     if (kpi === 'email') list = list.filter(c => c.csm1?.name && !c.csm1.email);
 
-    // CSM filter
+    // CSM filter — matches every spelling of the selected person, not just
+    // the one exact string shown in the dropdown
     if (csm !== 'All CSMs') {
-      list = list.filter(c => c.csm1?.name === csm || c.csm2?.name === csm);
+      const names = getNamesForCsmFilter(csm);
+      list = list.filter(c => names.has(c.csm1?.name) || names.has(c.csm2?.name));
     }
 
     // Product filter
