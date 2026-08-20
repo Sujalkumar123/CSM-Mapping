@@ -49,13 +49,29 @@ const leadSchema = new mongoose.Schema({
 // matched first). Mongo needs a real unique key, so each doc gets its own
 // ObjectId internally and "id" stays a plain, non-unique field — same
 // tolerant behavior, no rows silently dropped.
+const hierarchyEntrySchema = new mongoose.Schema({
+  role: { type: String, default: '' },
+  name: { type: String, default: '' },
+  email: { type: String, default: '' },
+  phone: { type: String, default: '' },
+  slack: { type: String, default: '' }
+}, { _id: false });
+
 const clientSchema = new mongoose.Schema({
   id: { type: String, default: '' },
   legalName: { type: String, default: '' },
   product: { type: String, default: '' },
   csm1: { type: personSchema, default: () => ({}) },
   csm2: { type: personSchema, default: () => ({}) },
-  lead: { type: leadSchema, default: () => ({}) }
+  lead: { type: leadSchema, default: () => ({}) },
+  // Every populated tier (L1 through VP), in ascending seniority order,
+  // blanks skipped — csm1/csm2/lead above stay Primary/AVP/VP specifically
+  // for the roster sync, messaging targets, and Unified Inbox, which don't
+  // need the full chain. This is purely for the client card, which does:
+  // a client can have more than 3 tiers filled (Senior CSE + CSM + AVP + VP
+  // is a real, common case), and collapsing that down to 3 fixed slots was
+  // silently discarding whichever tiers didn't make the cut.
+  hierarchy: { type: [hierarchyEntrySchema], default: () => [] }
 }, { collection: 'clients', versionKey: false });
 
 const ClientDoc = mongoose.models.ClientDoc || mongoose.model('ClientDoc', clientSchema);
@@ -80,7 +96,11 @@ function docToClient(doc) {
     lead: {
       name: doc.lead?.name || '', email: doc.lead?.email || '',
       phone: doc.lead?.phone || '', slack: doc.lead?.slack || ''
-    }
+    },
+    hierarchy: (doc.hierarchy || []).map(h => ({
+      role: h.role || '', name: h.name || '', email: h.email || '',
+      phone: h.phone || '', slack: h.slack || ''
+    }))
   };
 }
 
@@ -164,7 +184,8 @@ async function writeMongoClients(clients) {
       product: c.product || '',
       csm1: c.csm1 || {},
       csm2: c.csm2 || {},
-      lead: c.lead || {}
+      lead: c.lead || {},
+      hierarchy: c.hierarchy || []
     })));
   }
 }
