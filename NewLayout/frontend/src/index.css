@@ -229,6 +229,13 @@ a{color:inherit;text-decoration:none;}
 .contact.secondary:hover{box-shadow:0 10px 22px -12px var(--teal-glow);}
 .contact.lead{border-color:#F8E4C4;background:linear-gradient(180deg,#FFFBF3,var(--surface) 55%);}
 .contact.lead:hover{box-shadow:0 10px 22px -12px var(--amber-glow);}
+/* A client can have more than 3 populated tiers at once (Senior CSE + CSM
+   + AVP + VP all filled is a real, common case) — these two extra colors
+   cover the 4th/5th box rather than repeating a color already in view. */
+.contact.tier4{border-color:#E9DDFC;background:linear-gradient(180deg,#FBF9FF,var(--surface) 55%);}
+.contact.tier4:hover{box-shadow:0 10px 22px -12px var(--violet-glow);}
+.contact.tier5{border-color:#FBD9E1;background:linear-gradient(180deg,#FFF8FA,var(--surface) 55%);}
+.contact.tier5:hover{box-shadow:0 10px 22px -12px var(--rose-glow);}
 .contact.empty{
   display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:12px;
   background:var(--surface);
@@ -241,13 +248,19 @@ a{color:inherit;text-decoration:none;}
 .contact.primary .avatar-ring{background:linear-gradient(135deg,var(--cobalt),#8CA0FF);}
 .contact.secondary .avatar-ring{background:linear-gradient(135deg,var(--teal),#5EDCC9);}
 .contact.lead .avatar-ring{background:linear-gradient(135deg,var(--amber),#F7C574);}
+.contact.tier4 .avatar-ring{background:linear-gradient(135deg,var(--violet),#B79CF9);}
+.contact.tier5 .avatar-ring{background:linear-gradient(135deg,var(--rose),#F58CA3);}
 .contact.primary .avatar{background:var(--cobalt);}
 .contact.secondary .avatar{background:var(--teal);}
 .contact.lead .avatar{background:var(--amber);}
+.contact.tier4 .avatar{background:var(--violet);}
+.contact.tier5 .avatar{background:var(--rose);}
 .contact-role{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
 .contact.primary .contact-role{color:var(--cobalt-ink);}
 .contact.secondary .contact-role{color:var(--teal);}
 .contact.lead .contact-role{color:var(--amber);}
+.contact.tier4 .contact-role{color:var(--violet-ink);}
+.contact.tier5 .contact-role{color:var(--rose);}
 .contact-name{font-size:13.5px;font-weight:700;color:var(--ink);}
 
 .contact-meta{display:flex;flex-direction:column;gap:5px;margin-bottom:13px;padding:10px 11px;border-radius:10px;background:rgba(18,19,28,.025);}

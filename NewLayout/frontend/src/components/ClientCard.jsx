@@ -1,25 +1,23 @@
 import ContactBlock from './ContactBlock';
 
-const KINDS = ['primary', 'secondary', 'lead'];
+const KINDS = ['primary', 'secondary', 'lead', 'tier4', 'tier5'];
 
 export default function ClientCard({ client }) {
   const c = client;
 
-  // Primary/AVP/VP, but skip whichever ones have nobody assigned — an
-  // empty Primary with AVP and VP sitting two slots to the right (needing
-  // a scroll to reach) is worse than just shifting AVP into the first
-  // slot. Position drives the color (blue/teal/amber), not the role, so
-  // whatever lands in slot 1 always reads as "the main contact."
-  const slots = [
-    c.csm1?.name ? { roleLabel: c.csm1.role || 'Primary CSM', person: c.csm1 } : null,
-    c.csm2?.name ? { roleLabel: 'AVP - Customer Success', person: c.csm2 } : null,
-    c.lead?.name ? { roleLabel: 'VP - Customer Success', person: c.lead } : null,
-  ].filter(Boolean);
-
-  const boxes = slots.length > 0 ? slots : [{ roleLabel: 'Primary CSM', person: { name: 'Unassigned' } }];
+  // Every populated tier (L1 through VP), ascending seniority, blanks
+  // already skipped by the backend — a client can have more than 3 filled
+  // at once (Senior CSE + CSM + AVP + VP is a real, common case), so this
+  // is a variable-length row, not a fixed 3 slots. Position drives the
+  // color (blue/teal/amber/violet/rose), not the specific tier, so
+  // whatever lands in slot 1 always reads as "the main contact" and the
+  // most senior person present is always whichever box is last.
+  const boxes = c.hierarchy?.length > 0
+    ? c.hierarchy.map(h => ({ roleLabel: h.role, person: h }))
+    : [{ roleLabel: 'Primary CSM', person: { name: 'Unassigned' } }];
 
   return (
-    <div className={`card ${slots.length > 0 ? 'role-primary' : 'role-none'}`}>
+    <div className={`card ${c.hierarchy?.length > 0 ? 'role-primary' : 'role-none'}`}>
       <div className="card-head">
         <div className="company">
           <span className="company-name">{c.legalName}</span>
@@ -29,7 +27,7 @@ export default function ClientCard({ client }) {
       </div>
       <div className="contact-grid">
         {boxes.map((b, i) => (
-          <ContactBlock key={i} roleLabel={b.roleLabel} person={b.person} kind={KINDS[i]} />
+          <ContactBlock key={i} roleLabel={b.roleLabel} person={b.person} kind={KINDS[i % KINDS.length]} />
         ))}
       </div>
     </div>
