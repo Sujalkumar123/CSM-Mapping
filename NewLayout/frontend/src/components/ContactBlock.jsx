@@ -1,10 +1,10 @@
 import { getInitials, getWhatsAppLink } from '../data/clients';
 import { IconMail, IconPhone, IconSlack, IconCompose, IconWhatsApp } from './Icons';
 
-export default function ContactBlock({ roleLabel, person, kind }) {
+export default function ContactBlock({ roleLabel, person, kind, style }) {
   if (!person || !person.name) {
     return (
-      <div className={`contact ${kind} empty`}>
+      <div className={`contact ${kind} empty`} style={style}>
         No {roleLabel.toLowerCase()} assigned
       </div>
     );
@@ -14,7 +14,7 @@ export default function ContactBlock({ roleLabel, person, kind }) {
   const wa = getWhatsAppLink(person.phone);
 
   return (
-    <div className={`contact ${kind}`}>
+    <div className={`contact ${kind}`} style={style}>
       <div className="contact-top">
         <div className="avatar-ring">
           <div className="avatar">{ini}</div>

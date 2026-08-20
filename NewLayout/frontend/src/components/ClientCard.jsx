@@ -16,6 +16,18 @@ export default function ClientCard({ client }) {
     ? c.hierarchy.map(h => ({ roleLabel: h.role, person: h }))
     : [{ roleLabel: 'Primary CSM', person: { name: 'Unassigned' } }];
 
+  // Exactly 3 visible at a time, no matter how wide the screen is — a
+  // width-based "however many fit at a comfortable size" rule (what this
+  // used to be) meant a wide monitor showed all 5 tiers on one client at
+  // once, which defeats the point: scrolling right is supposed to mean
+  // "ask the next, more senior person," and that only reads correctly if
+  // the row is always paced 3 at a time. Sizing 4+ boxes as if there were
+  // only 3 is what forces the extra ones into a scroll regardless of
+  // available width; 1-2 boxes still divide the full width between them.
+  const visibleCount = Math.min(boxes.length, 3);
+  const gap = 12;
+  const boxStyle = { flex: `0 0 calc((100% - ${(visibleCount - 1) * gap}px) / ${visibleCount})` };
+
   return (
     <div className={`card ${c.hierarchy?.length > 0 ? 'role-primary' : 'role-none'}`}>
       <div className="card-head">
@@ -27,7 +39,7 @@ export default function ClientCard({ client }) {
       </div>
       <div className="contact-grid">
         {boxes.map((b, i) => (
-          <ContactBlock key={i} roleLabel={b.roleLabel} person={b.person} kind={KINDS[i % KINDS.length]} />
+          <ContactBlock key={i} roleLabel={b.roleLabel} person={b.person} kind={KINDS[i % KINDS.length]} style={boxStyle} />
         ))}
       </div>
     </div>
